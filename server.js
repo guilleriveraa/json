@@ -88,13 +88,20 @@ console.log('✅ x-powered-by deshabilitado');
 // 3. Configuración de CORS
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
-        ? ['https://tudominio.com']
+        ? [
+            'https://fronted-j3e4vw331-guilleriveraas-projects.vercel.app',
+            'https://fronted.vercel.app',
+            'https://*.vercel.app'
+          ]
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
     optionsSuccessStatus: 200
 };
+
+// IMPORTANTE: Añade esto para manejar preflight requests
+app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 console.log('✅ CORS configurado');
 
@@ -1658,130 +1665,6 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
 });
 console.log('✅ Ruta GET /api/orders/:orderId/items configurada');
 
-// ===================== DEVOLUCIONES =====================
-console.log('🔄 Configurando rutas de devoluciones...');
-
-// Ruta GET para obtener pedidos elegibles
-app.get('/api/orders/eligible-for-return', async (req, res) => {
-    console.log('\n========== DEVOLUCIONES GET ==========');
-    console.log('📦 [RETURN GET] Ruta llamada');
-    
-    const authHeader = req.headers.authorization;
-    console.log('Auth header existe:', !!authHeader);
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log('❌ [RETURN GET] No autorizado - header inválido');
-        return res.status(401).json({ message: 'No autorizado' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    console.log('Token recibido (primeros 20 chars):', token.substring(0, 20) + '...');
-
-    try {
-        console.log('🔐 [RETURN GET] Verificando token...');
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const usuarioId = decoded.userId;
-        console.log('✅ [RETURN GET] Token válido. Usuario ID:', usuarioId);
-
-        console.log('📊 [RETURN GET] Consultando pedidos elegibles...');
-        const { rows: pedidos } = await db.query(
-            `SELECT 
-                id,
-                TO_CHAR(fecha, 'DD/MM/YYYY') as date,
-                total,
-                estado as status
-             FROM pedidos
-             WHERE usuario_id = $1 
-               AND estado = 'entregado'
-               AND fecha >= NOW() - INTERVAL '30 days'
-             ORDER BY fecha DESC`,
-            [usuarioId]
-        );
-
-        console.log(`📦 [RETURN GET] Pedidos encontrados: ${pedidos.length}`);
-        
-        if (pedidos.length === 0) {
-            console.log('ℹ️ [RETURN GET] No hay pedidos elegibles');
-            return res.json([]);
-        }
-
-        const pedidosConItems = await Promise.all(pedidos.map(async (pedido) => {
-            console.log(`🔍 [RETURN GET] Buscando items para pedido ${pedido.id}...`);
-            const { rows: items } = await db.query(
-                `SELECT 
-                    oi.producto_id as id,
-                    p.nombre as name,
-                    oi.cantidad as quantity,
-                    oi.precio as price
-                 FROM order_items oi
-                 JOIN productos p ON oi.producto_id = p.id
-                 WHERE oi.pedido_id = $1`,
-                [pedido.id]
-            );
-            
-            console.log(`   → ${items.length} items encontrados`);
-            return { ...pedido, items };
-        }));
-
-        console.log('✅ [RETURN GET] Respuesta enviada correctamente');
-        res.json(pedidosConItems);
-
-    } catch (err) {
-        console.error('❌ [RETURN GET] ERROR:');
-        console.error('   Mensaje:', err.message);
-        console.error('   Stack:', err.stack);
-        res.status(500).json({ message: 'Error al obtener pedidos: ' + err.message });
-    }
-});
-console.log('✅ Ruta GET /api/orders/eligible-for-return configurada (devoluciones)');
-
-// Ruta POST para crear una devolución
-app.post('/api/returns', async (req, res) => {
-    console.log('\n========== CREAR DEVOLUCIÓN ==========');
-    console.log('📦 [RETURN POST] Ruta llamada');
-    
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        console.log('❌ [RETURN POST] No autorizado - sin token');
-        return res.status(401).json({ message: 'No autorizado' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    const { orderId, reason } = req.body;
-    
-    console.log('📦 [RETURN POST] Solicitando devolución para pedido:', orderId);
-    console.log('📝 [RETURN POST] Motivo:', reason);
-
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        const usuarioId = decoded.userId;
-        console.log('✅ [RETURN POST] Token válido para usuario:', usuarioId);
-
-        const { rows: pedido } = await db.query(
-            'SELECT * FROM pedidos WHERE id = $1 AND usuario_id = $2',
-            [orderId, usuarioId]
-        );
-
-        if (pedido.length === 0) {
-            console.log('❌ [RETURN POST] Pedido no encontrado o no pertenece al usuario');
-            return res.status(404).json({ message: 'Pedido no encontrado' });
-        }
-
-        console.log('✅ [RETURN POST] Pedido verificado, creando devolución');
-        await db.query(
-            'INSERT INTO devoluciones (pedido_id, motivo, estado) VALUES ($1, $2, $3)',
-            [orderId, reason, 'pendiente']
-        );
-
-        console.log('✅ [RETURN POST] Devolución creada correctamente');
-        res.json({ message: 'Solicitud de devolución enviada correctamente' });
-
-    } catch (err) {
-        console.error('❌ [RETURN POST] Error:', err);
-        res.status(500).json({ message: 'Error al procesar la devolución' });
-    }
-});
-console.log('✅ Ruta POST /api/returns configurada');
 
 // ===================== ADMIN - RUTAS PARA EL PANEL =====================
 console.log('👑 Configurando rutas de administración...');
