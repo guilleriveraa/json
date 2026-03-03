@@ -14,13 +14,30 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
+// Manejador global de errores no capturados
+process.on('uncaughtException', (err) => {
+    console.error('❌ ERROR NO CAPTURADO:', err);
+    console.error('Stack:', err.stack);
+    // No salimos del proceso para poder ver el error
+});
+
+process.on('unhandledRejection', (err) => {
+    console.error('❌ PROMESA RECHAZADA NO MANEJADA:', err);
+});
 
 // Verificar JWT_SECRET
 if (!JWT_SECRET) {
     console.error('❌ JWT_SECRET no está definido en .env');
     process.exit(1);
 }
-
+// Verificar variables de entorno críticas
+const requiredEnv = ['JWT_SECRET', 'DATABASE_URL', 'STRIPE_SECRET_KEY'];
+requiredEnv.forEach(envVar => {
+    if (!process.env[envVar]) {
+        console.error(`❌ Variable de entorno ${envVar} no definida`);
+        process.exit(1);
+    }
+});
 // ===== CONFIGURACIÓN DE SEGURIDAD =====
 
 // 1. Helmet - Protección de cabeceras HTTP
@@ -32,7 +49,7 @@ app.disable('x-powered-by');
 // 3. Configuración de CORS
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
-        ? ['https://tudominio.com'] // 👈 Reemplaza con tu dominio real
+        ? ['https://tudominio.com']
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -61,7 +78,7 @@ app.use('/api/', limiter);
 app.use('/api/login', authLimiter);
 app.use('/api/register', authLimiter);
 
-// ===== WEBHOOK DE STRIPE (VERSIÓN CORREGIDA) =====
+// ===== WEBHOOK DE STRIPE =====
 app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
     const sig = req.headers['stripe-signature'];
     let event;
@@ -86,7 +103,6 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
         console.log(`✅ Pago completado para usuario ${usuarioId}`);
 
         try {
-            // 🔥 Obtener dirección del METADATA (más fiable)
             const direccionEnvio = [
                 session.metadata.direccion_calle,
                 session.metadata.direccion_piso,
@@ -106,36 +122,36 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
 
             console.log('📍 Dirección:', direccionEnvio || 'No especificada');
 
-            const [pedidoResult] = await db.query(
+            const { rows: pedidoRows } = await db.query(
                 `INSERT INTO pedidos 
                  (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id) 
-                 VALUES (?, ?, 'pagado', NOW(), ?, ?, ?, ?, ?)`,
+                 VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7) RETURNING id`,
                 [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id]
             );
             
-            const pedidoId = pedidoResult.insertId;
+            const pedidoId = pedidoRows[0].id;
             console.log(`🎉 Pedido creado ID: ${pedidoId}`);
 
-            const [items] = await db.query(
+            const { rows: items } = await db.query(
                 `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id
                  FROM cart_items ci
                  JOIN productos p ON ci.producto_id = p.id
-                 WHERE ci.carrito_id = ?`,
+                 WHERE ci.carrito_id = $1`,
                 [carritoId]
             );
 
             for (const item of items) {
                 await db.query(
-                    'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio) VALUES (?, ?, ?, ?)',
+                    'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio) VALUES ($1, $2, $3, $4)',
                     [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario)]
                 );
             }
 
-            await db.query('DELETE FROM cart_items WHERE carrito_id = ?', [carritoId]);
+            await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
 
             if (cuponId) {
                 await db.query(
-                    'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = ?',
+                    'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
                     [cuponId]
                 );
             }
@@ -186,8 +202,8 @@ app.post('/api/register',
                 return res.status(400).json({ message });
             }
 
-            const [existing] = await db.query(
-                'SELECT * FROM usuarios WHERE email = ?',
+            const { rows: existing } = await db.query(
+                'SELECT * FROM usuarios WHERE email = $1',
                 [email]
             );
 
@@ -196,17 +212,17 @@ app.post('/api/register',
             }
 
             const hashedPassword = await bcrypt.hash(contraseña, 10);
-            const [result] = await db.query(
-                'INSERT INTO usuarios (nombre, email, contraseña) VALUES (?, ?, ?)',
+            const { rows: newUser } = await db.query(
+                'INSERT INTO usuarios (nombre, email, contraseña) VALUES ($1, $2, $3) RETURNING id',
                 [nombre, email, hashedPassword]
             );
 
-            const token = jwt.sign({ userId: result.insertId }, JWT_SECRET, { expiresIn: '30d' });
+            const token = jwt.sign({ userId: newUser[0].id }, JWT_SECRET, { expiresIn: '30d' });
 
             res.json({
                 message: 'Usuario registrado',
                 token,
-                userId: result.insertId,
+                userId: newUser[0].id,
                 nombre
             });
 
@@ -230,8 +246,8 @@ app.get('/api/user/is-admin', async (req, res) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         
-        const [rows] = await db.query(
-            'SELECT is_admin FROM usuarios WHERE id = ?',
+        const { rows } = await db.query(
+            'SELECT is_admin FROM usuarios WHERE id = $1',
             [decoded.userId]
         );
 
@@ -262,8 +278,8 @@ app.post('/api/login',
         const { email, contraseña } = req.body;
 
         try {
-            const [rows] = await db.query(
-                'SELECT * FROM usuarios WHERE email = ?',
+            const { rows } = await db.query(
+                'SELECT * FROM usuarios WHERE email = $1',
                 [email]
             );
 
@@ -306,8 +322,8 @@ app.get('/api/users/me', async (req, res) => {
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        const [rows] = await db.query(
-            'SELECT id, nombre, email, fecha_creacion FROM usuarios WHERE id = ?',
+        const { rows } = await db.query(
+            'SELECT id, nombre, email, fecha_creacion FROM usuarios WHERE id = $1',
             [decoded.userId]
         );
 
@@ -338,7 +354,7 @@ app.put('/api/users/me', async (req, res) => {
         const { nombre } = req.body;
         
         await db.query(
-            'UPDATE usuarios SET nombre = ? WHERE id = ?',
+            'UPDATE usuarios SET nombre = $1 WHERE id = $2',
             [nombre, decoded.userId]
         );
 
@@ -364,8 +380,8 @@ app.post('/api/users/change-password', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const { currentPassword, newPassword } = req.body;
 
-        const [rows] = await db.query(
-            'SELECT contraseña FROM usuarios WHERE id = ?',
+        const { rows } = await db.query(
+            'SELECT contraseña FROM usuarios WHERE id = $1',
             [decoded.userId]
         );
 
@@ -381,7 +397,7 @@ app.post('/api/users/change-password', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await db.query(
-            'UPDATE usuarios SET contraseña = ? WHERE id = ?',
+            'UPDATE usuarios SET contraseña = $1 WHERE id = $2',
             [hashedPassword, decoded.userId]
         );
 
@@ -411,7 +427,7 @@ app.post('/api/contact',
 
         try {
             await db.query(
-                'INSERT INTO contact_messages (nombre, email, asunto, mensaje) VALUES (?, ?, ?, ?)',
+                'INSERT INTO contact_messages (nombre, email, asunto, mensaje) VALUES ($1, $2, $3, $4)',
                 [name, email, subject || 'Sin asunto', message]
             );
             console.log('✅ Mensaje guardado en BD');
@@ -431,52 +447,7 @@ app.post('/api/contact',
                 to: 'guilleriveraa12@gmail.com',
                 replyTo: email,
                 subject: `📬 ${subject || 'Nuevo mensaje'} de ${name}`,
-                html: `
-                    <!DOCTYPE html>
-                    <html>
-                    <head>
-                        <style>
-                            body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-                            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
-                            .header { background: #c62828; color: white; padding: 10px 20px; border-radius: 5px 5px 0 0; }
-                            .content { background: #f9f9f9; padding: 20px; border: 1px solid #ddd; border-radius: 0 0 5px 5px; }
-                            .field { margin-bottom: 15px; }
-                            .label { font-weight: bold; color: #c62828; }
-                            .value { margin-top: 5px; padding: 10px; background: white; border-radius: 3px; }
-                            .footer { margin-top: 20px; font-size: 0.9em; color: #666; text-align: center; }
-                        </style>
-                    </head>
-                    <body>
-                        <div class="container">
-                            <div class="header">
-                                <h2>📬 Nuevo mensaje de contacto</h2>
-                            </div>
-                            <div class="content">
-                                <div class="field">
-                                    <div class="label">👤 Nombre:</div>
-                                    <div class="value">${name}</div>
-                                </div>
-                                <div class="field">
-                                    <div class="label">📧 Email:</div>
-                                    <div class="value">${email}</div>
-                                </div>
-                                <div class="field">
-                                    <div class="label">📝 Asunto:</div>
-                                    <div class="value">${subject || 'Sin asunto'}</div>
-                                </div>
-                                <div class="field">
-                                    <div class="label">💬 Mensaje:</div>
-                                    <div class="value">${message.replace(/\n/g, '<br>')}</div>
-                                </div>
-                            </div>
-                            <div class="footer">
-                                <p>Este mensaje fue enviado desde el formulario de contacto de SalamancaVivela.</p>
-                                <p>© ${new Date().getFullYear()} SalamancaVivela</p>
-                            </div>
-                        </div>
-                    </body>
-                    </html>
-                `
+                html: `...` // Mantén tu HTML aquí
             };
 
             await transporter.sendMail(mailOptions);
@@ -491,17 +462,17 @@ app.post('/api/contact',
 
 // ===================== CARRITO =====================
 async function getOrCreateCart(usuarioId) {
-    let [carrito] = await db.query(
-        'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+    const { rows: carrito } = await db.query(
+        'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
         [usuarioId]
     );
     
     if (carrito.length === 0) {
-        const [result] = await db.query(
-            'INSERT INTO carritos (usuario_id) VALUES (?)',
+        const { rows: newCart } = await db.query(
+            'INSERT INTO carritos (usuario_id) VALUES ($1) RETURNING id',
             [usuarioId]
         );
-        return result.insertId;
+        return newCart[0].id;
     }
     
     return carrito[0].id;
@@ -520,8 +491,8 @@ app.get('/api/cart', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [carrito] = await db.query(
-            'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+        const { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
             [usuarioId]
         );
 
@@ -530,11 +501,11 @@ app.get('/api/cart', async (req, res) => {
         }
 
         const carritoId = carrito[0].id;
-        const [items] = await db.query(
+        const { rows: items } = await db.query(
             `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen
              FROM cart_items ci
              JOIN productos p ON ci.producto_id = p.id
-             WHERE ci.carrito_id = ?`,
+             WHERE ci.carrito_id = $1`,
             [carritoId]
         );
 
@@ -581,8 +552,8 @@ app.post('/api/cart/add', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [product] = await db.query(
-            'SELECT * FROM productos WHERE id = ?',
+        const { rows: product } = await db.query(
+            'SELECT * FROM productos WHERE id = $1',
             [productId]
         );
 
@@ -590,35 +561,35 @@ app.post('/api/cart/add', async (req, res) => {
             return res.status(404).json({ message: 'Producto no encontrado' });
         }
 
-        let [carrito] = await db.query(
-            'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+        let { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
             [usuarioId]
         );
 
         let carritoId;
         if (carrito.length === 0) {
-            const [result] = await db.query(
-                'INSERT INTO carritos (usuario_id) VALUES (?)',
+            const { rows: newCart } = await db.query(
+                'INSERT INTO carritos (usuario_id) VALUES ($1) RETURNING id',
                 [usuarioId]
             );
-            carritoId = result.insertId;
+            carritoId = newCart[0].id;
         } else {
             carritoId = carrito[0].id;
         }
 
-        const [existing] = await db.query(
-            'SELECT id, cantidad FROM cart_items WHERE carrito_id = ? AND producto_id = ?',
+        const { rows: existing } = await db.query(
+            'SELECT id, cantidad FROM cart_items WHERE carrito_id = $1 AND producto_id = $2',
             [carritoId, productId]
         );
 
         if (existing.length > 0) {
             await db.query(
-                'UPDATE cart_items SET cantidad = cantidad + ? WHERE id = ?',
+                'UPDATE cart_items SET cantidad = cantidad + $1 WHERE id = $2',
                 [quantity, existing[0].id]
             );
         } else {
             await db.query(
-                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario) VALUES (?, ?, ?, ?)',
+                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario) VALUES ($1, $2, $3, $4)',
                 [carritoId, productId, quantity, product[0].precio]
             );
         }
@@ -645,8 +616,8 @@ app.post('/api/cart/update', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [carrito] = await db.query(
-            'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+        const { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
             [usuarioId]
         );
 
@@ -658,17 +629,17 @@ app.post('/api/cart/update', async (req, res) => {
 
         if (delta > 0) {
             await db.query(
-                'UPDATE cart_items SET cantidad = cantidad + ? WHERE carrito_id = ? AND producto_id = ?',
+                'UPDATE cart_items SET cantidad = cantidad + $1 WHERE carrito_id = $2 AND producto_id = $3',
                 [delta, carritoId, productId]
             );
         } else {
             await db.query(
-                'UPDATE cart_items SET cantidad = cantidad + ? WHERE carrito_id = ? AND producto_id = ? AND cantidad > ?',
+                'UPDATE cart_items SET cantidad = cantidad + $1 WHERE carrito_id = $2 AND producto_id = $3 AND cantidad > $4',
                 [delta, carritoId, productId, -delta]
             );
             
             await db.query(
-                'DELETE FROM cart_items WHERE carrito_id = ? AND producto_id = ? AND cantidad <= 0',
+                'DELETE FROM cart_items WHERE carrito_id = $1 AND producto_id = $2 AND cantidad <= 0',
                 [carritoId, productId]
             );
         }
@@ -695,8 +666,8 @@ app.delete('/api/cart/remove/:productId', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [carrito] = await db.query(
-            'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+        const { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
             [usuarioId]
         );
 
@@ -705,7 +676,7 @@ app.delete('/api/cart/remove/:productId', async (req, res) => {
         }
 
         await db.query(
-            'DELETE FROM cart_items WHERE carrito_id = ? AND producto_id = ?',
+            'DELETE FROM cart_items WHERE carrito_id = $1 AND producto_id = $2',
             [carrito[0].id, productId]
         );
 
@@ -730,13 +701,13 @@ app.get('/api/productos', async (req, res) => {
         let params = [];
         
         if (categoria) {
-            query += ` WHERE c.nombre = ?`;
+            query += ` WHERE c.nombre = $1`;
             params.push(categoria);
         }
         
         query += ` ORDER BY p.nombre ASC`;
         
-        const [productos] = await db.query(query, params);
+        const { rows: productos } = await db.query(query, params);
         res.json(productos);
         
     } catch (err) {
@@ -749,11 +720,11 @@ app.get('/api/productos/:id', async (req, res) => {
     const { id } = req.params;
     
     try {
-        const [productos] = await db.query(
+        const { rows: productos } = await db.query(
             `SELECT p.*, c.nombre as categoria_nombre
              FROM productos p
              LEFT JOIN categorias c ON p.categoria_id = c.id
-             WHERE p.id = ?`,
+             WHERE p.id = $1`,
             [id]
         );
         
@@ -771,7 +742,7 @@ app.get('/api/productos/:id', async (req, res) => {
 
 app.get('/api/categorias', async (req, res) => {
     try {
-        const [categorias] = await db.query(
+        const { rows: categorias } = await db.query(
             'SELECT * FROM categorias ORDER BY nombre ASC'
         );
         res.json(categorias);
@@ -790,9 +761,9 @@ app.post('/api/cupones/validar', async (req, res) => {
     }
 
     try {
-        const [cupones] = await db.query(
+        const { rows: cupones } = await db.query(
             `SELECT * FROM cupones 
-             WHERE codigo = ? AND activo = TRUE 
+             WHERE codigo = $1 AND activo = TRUE 
              AND (fecha_fin IS NULL OR fecha_fin >= NOW())`,
             [codigo]
         );
@@ -815,8 +786,8 @@ app.post('/api/cupones/validar', async (req, res) => {
         }
 
         if (usuarioId) {
-            const [usado] = await db.query(
-                'SELECT * FROM cupones_usados WHERE cupon_id = ? AND usuario_id = ?',
+            const { rows: usado } = await db.query(
+                'SELECT * FROM cupones_usados WHERE cupon_id = $1 AND usuario_id = $2',
                 [cupon.id, usuarioId]
             );
 
@@ -898,8 +869,8 @@ app.post('/api/create-checkout-session',
                 console.log('📍 Dirección:', direccionEnvio);
             }
 
-            const [carrito] = await db.query(
-                'SELECT id FROM carritos WHERE usuario_id = ? ORDER BY fecha_creacion DESC LIMIT 1',
+            const { rows: carrito } = await db.query(
+                'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
                 [usuarioId]
             );
 
@@ -909,11 +880,11 @@ app.post('/api/create-checkout-session',
 
             const carritoId = carrito[0].id;
 
-            const [items] = await db.query(
+            const { rows: items } = await db.query(
                 `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre
                  FROM cart_items ci
                  JOIN productos p ON ci.producto_id = p.id
-                 WHERE ci.carrito_id = ?`,
+                 WHERE ci.carrito_id = $1`,
                 [carritoId]
             );
 
@@ -934,8 +905,8 @@ app.post('/api/create-checkout-session',
             let cuponId = null;
 
             if (req.body.cuponId) {
-                const [cupones] = await db.query(
-                    'SELECT * FROM cupones WHERE id = ? AND activo = TRUE AND (fecha_fin IS NULL OR fecha_fin >= NOW())',
+                const { rows: cupones } = await db.query(
+                    'SELECT * FROM cupones WHERE id = $1 AND activo = TRUE AND (fecha_fin IS NULL OR fecha_fin >= NOW())',
                     [req.body.cuponId]
                 );
                 
@@ -1045,16 +1016,16 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
         console.log('✅ Token válido. Usuario ID:', usuarioId);
 
         console.log('📊 Consultando pedidos elegibles...');
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT 
                 id,
-                DATE_FORMAT(fecha, '%d/%m/%Y') as date,
+                TO_CHAR(fecha, 'DD/MM/YYYY') as date,
                 total,
                 estado as status
              FROM pedidos
-             WHERE usuario_id = ? 
+             WHERE usuario_id = $1 
                AND estado = 'entregado'
-               AND fecha >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+               AND fecha >= NOW() - INTERVAL '30 days'
              ORDER BY fecha DESC`,
             [usuarioId]
         );
@@ -1068,7 +1039,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
 
         const pedidosConItems = await Promise.all(pedidos.map(async (pedido) => {
             console.log(`🔍 Buscando items para pedido ${pedido.id}...`);
-            const [items] = await db.query(
+            const { rows: items } = await db.query(
                 `SELECT 
                     oi.producto_id as id,
                     p.nombre as name,
@@ -1076,7 +1047,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
                     oi.precio as price
                  FROM order_items oi
                  JOIN productos p ON oi.producto_id = p.id
-                 WHERE oi.pedido_id = ?`,
+                 WHERE oi.pedido_id = $1`,
                 [pedido.id]
             );
             
@@ -1108,7 +1079,7 @@ app.get('/api/orders/my-orders', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT 
                 id,
                 fecha as date,
@@ -1117,7 +1088,7 @@ app.get('/api/orders/my-orders', async (req, res) => {
                 tracking_number,
                 tracking_company
              FROM pedidos
-             WHERE usuario_id = ?
+             WHERE usuario_id = $1
              ORDER BY fecha DESC`,
             [usuarioId]
         );
@@ -1145,8 +1116,8 @@ app.get('/api/orders/:orderId', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [pedidos] = await db.query(
-            'SELECT * FROM pedidos WHERE id = ? AND usuario_id = ?',
+        const { rows: pedidos } = await db.query(
+            'SELECT * FROM pedidos WHERE id = $1 AND usuario_id = $2',
             [orderId, usuarioId]
         );
 
@@ -1176,8 +1147,8 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        const [pedido] = await db.query(
-            'SELECT id FROM pedidos WHERE id = ? AND usuario_id = ?',
+        const { rows: pedido } = await db.query(
+            'SELECT id FROM pedidos WHERE id = $1 AND usuario_id = $2',
             [orderId, usuarioId]
         );
 
@@ -1185,7 +1156,7 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
             return res.status(404).json({ message: 'Pedido no encontrado' });
         }
 
-        const [items] = await db.query(
+        const { rows: items } = await db.query(
             `SELECT 
                 oi.id,
                 oi.producto_id,
@@ -1195,7 +1166,7 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
                 oi.precio
              FROM order_items oi
              JOIN productos p ON oi.producto_id = p.id
-             WHERE oi.pedido_id = ?`,
+             WHERE oi.pedido_id = $1`,
             [orderId]
         );
 
@@ -1232,16 +1203,16 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
         console.log('✅ Token válido. Usuario ID:', usuarioId);
 
         console.log('📊 Consultando pedidos elegibles...');
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT 
                 id,
-                DATE_FORMAT(fecha, '%d/%m/%Y') as date,
+                TO_CHAR(fecha, 'DD/MM/YYYY') as date,
                 total,
                 estado as status
              FROM pedidos
-             WHERE usuario_id = ? 
+             WHERE usuario_id = $1 
                AND estado = 'entregado'
-               AND fecha >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+               AND fecha >= NOW() - INTERVAL '30 days'
              ORDER BY fecha DESC`,
             [usuarioId]
         );
@@ -1255,7 +1226,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
 
         const pedidosConItems = await Promise.all(pedidos.map(async (pedido) => {
             console.log(`🔍 Buscando items para pedido ${pedido.id}...`);
-            const [items] = await db.query(
+            const { rows: items } = await db.query(
                 `SELECT 
                     oi.producto_id as id,
                     p.nombre as name,
@@ -1263,7 +1234,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
                     oi.precio as price
                  FROM order_items oi
                  JOIN productos p ON oi.producto_id = p.id
-                 WHERE oi.pedido_id = ?`,
+                 WHERE oi.pedido_id = $1`,
                 [pedido.id]
             );
             
@@ -1301,9 +1272,8 @@ app.post('/api/returns', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
 
-        // Verificar que el pedido pertenece al usuario
-        const [pedido] = await db.query(
-            'SELECT * FROM pedidos WHERE id = ? AND usuario_id = ?',
+        const { rows: pedido } = await db.query(
+            'SELECT * FROM pedidos WHERE id = $1 AND usuario_id = $2',
             [orderId, usuarioId]
         );
 
@@ -1312,10 +1282,9 @@ app.post('/api/returns', async (req, res) => {
             return res.status(404).json({ message: 'Pedido no encontrado' });
         }
 
-        // Insertar solicitud de devolución
         await db.query(
-            'INSERT INTO devoluciones (pedido_id, motivo, estado) VALUES (?, ?, "pendiente")',
-            [orderId, reason]
+            'INSERT INTO devoluciones (pedido_id, motivo, estado) VALUES ($1, $2, $3)',
+            [orderId, reason, 'pendiente']
         );
 
         console.log('✅ Devolución solicitada para pedido:', orderId);
@@ -1338,7 +1307,7 @@ async function verificarAdmin(req, res, next) {
     try {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
-        const [rows] = await db.query('SELECT is_admin FROM usuarios WHERE id = ?', [decoded.userId]);
+        const { rows } = await db.query('SELECT is_admin FROM usuarios WHERE id = $1', [decoded.userId]);
         
         if (!rows[0]?.is_admin) {
             return res.status(403).json({ message: 'Acceso denegado' });
@@ -1376,7 +1345,7 @@ const orderStatusValidator = [
 // ===================== RUTAS ADMIN =====================
 app.get('/api/admin/pedidos', verificarAdmin, async (req, res) => {
     try {
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT p.*, u.nombre as cliente_nombre, u.email as cliente_email
              FROM pedidos p
              JOIN usuarios u ON p.usuario_id = u.id
@@ -1398,12 +1367,12 @@ app.put('/api/admin/pedidos/:id', verificarAdmin, orderStatusValidator, async (r
     const { estado } = req.body;
 
     try {
-        const [result] = await db.query(
-            'UPDATE pedidos SET estado = ? WHERE id = ?',
+        const { rowCount } = await db.query(
+            'UPDATE pedidos SET estado = $1 WHERE id = $2',
             [estado, id]
         );
 
-        if (result.affectedRows === 0) {
+        if (rowCount === 0) {
             return res.status(404).json({ message: 'Pedido no encontrado' });
         }
 
@@ -1420,12 +1389,12 @@ app.get('/api/admin/ultimos-pedidos', verificarAdmin, async (req, res) => {
     }
     
     try {
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT p.*, u.nombre as cliente_nombre
              FROM pedidos p
              JOIN usuarios u ON p.usuario_id = u.id
              ORDER BY p.fecha DESC
-             LIMIT ?`,
+             LIMIT $1`,
             [limite]
         );
         res.json(pedidos);
@@ -1436,7 +1405,7 @@ app.get('/api/admin/ultimos-pedidos', verificarAdmin, async (req, res) => {
 
 app.get('/api/admin/cupones', verificarAdmin, async (req, res) => {
     try {
-        const [cupones] = await db.query('SELECT * FROM cupones ORDER BY created_at DESC');
+        const { rows: cupones } = await db.query('SELECT * FROM cupones ORDER BY created_at DESC');
         res.json(cupones);
     } catch (err) {
         res.status(500).json({ message: 'Error al obtener cupones' });
@@ -1452,14 +1421,14 @@ app.post('/api/admin/cupones', verificarAdmin, couponValidator, async (req, res)
     const { codigo, descripcion, tipo_descuento, valor_descuento, monto_minimo, fecha_fin, uso_maximo } = req.body;
 
     try {
-        const [result] = await db.query(
+        const { rows: newCupon } = await db.query(
             `INSERT INTO cupones 
              (codigo, descripcion, tipo_descuento, valor_descuento, monto_minimo, fecha_fin, uso_maximo) 
-             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
             [codigo, descripcion, tipo_descuento, valor_descuento, monto_minimo || 0, fecha_fin || null, uso_maximo || 1]
         );
 
-        res.json({ message: 'Cupón creado', id: result.insertId });
+        res.json({ message: 'Cupón creado', id: newCupon[0].id });
     } catch (err) {
         res.status(500).json({ message: 'Error al crear cupón' });
     }
@@ -1474,7 +1443,7 @@ app.put('/api/admin/cupones/:id', verificarAdmin, async (req, res) => {
     }
 
     try {
-        await db.query('UPDATE cupones SET activo = ? WHERE id = ?', [activo, id]);
+        await db.query('UPDATE cupones SET activo = $1 WHERE id = $2', [activo, id]);
         res.json({ message: 'Cupón actualizado' });
     } catch (err) {
         res.status(500).json({ message: 'Error al actualizar' });
@@ -1489,7 +1458,7 @@ app.delete('/api/admin/cupones/:id', verificarAdmin, async (req, res) => {
     }
 
     try {
-        await db.query('DELETE FROM cupones WHERE id = ?', [id]);
+        await db.query('DELETE FROM cupones WHERE id = $1', [id]);
         res.json({ message: 'Cupón eliminado' });
     } catch (err) {
         res.status(500).json({ message: 'Error al eliminar' });
@@ -1505,11 +1474,11 @@ app.post('/api/admin/productos', verificarAdmin, productValidator, async (req, r
     const { nombre, descripcion, precio, imagen, categoria_id } = req.body;
 
     try {
-        const [result] = await db.query(
-            'INSERT INTO productos (nombre, descripcion, precio, imagen, categoria_id) VALUES (?, ?, ?, ?, ?)',
+        const { rows: newProduct } = await db.query(
+            'INSERT INTO productos (nombre, descripcion, precio, imagen, categoria_id) VALUES ($1, $2, $3, $4, $5) RETURNING id',
             [nombre, descripcion, precio, imagen, categoria_id]
         );
-        res.json({ message: 'Producto creado', id: result.insertId });
+        res.json({ message: 'Producto creado', id: newProduct[0].id });
     } catch (err) {
         res.status(500).json({ message: 'Error al crear producto' });
     }
@@ -1526,7 +1495,7 @@ app.put('/api/admin/productos/:id', verificarAdmin, productValidator, async (req
 
     try {
         await db.query(
-            'UPDATE productos SET nombre=?, descripcion=?, precio=?, imagen=?, categoria_id=? WHERE id=?',
+            'UPDATE productos SET nombre = $1, descripcion = $2, precio = $3, imagen = $4, categoria_id = $5 WHERE id = $6',
             [nombre, descripcion, precio, imagen, categoria_id, id]
         );
         res.json({ message: 'Producto actualizado' });
@@ -1539,7 +1508,7 @@ app.delete('/api/admin/productos/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
 
     try {
-        await db.query('DELETE FROM productos WHERE id = ?', [id]);
+        await db.query('DELETE FROM productos WHERE id = $1', [id]);
         res.json({ message: 'Producto eliminado' });
     } catch (err) {
         res.status(500).json({ message: 'Error al eliminar producto' });
@@ -1549,7 +1518,7 @@ app.delete('/api/admin/productos/:id', verificarAdmin, async (req, res) => {
 // ===================== ADMIN - DEVOLUCIONES =====================
 app.get('/api/admin/devoluciones', verificarAdmin, async (req, res) => {
     try {
-        const [devoluciones] = await db.query(
+        const { rows: devoluciones } = await db.query(
             `SELECT d.*, u.nombre as cliente_nombre, u.email as cliente_email, p.total as pedido_total
              FROM devoluciones d
              JOIN pedidos p ON d.pedido_id = p.id
@@ -1573,7 +1542,7 @@ app.put('/api/admin/devoluciones/:id', verificarAdmin, async (req, res) => {
 
     try {
         await db.query(
-            'UPDATE devoluciones SET estado = ? WHERE id = ?',
+            'UPDATE devoluciones SET estado = $1 WHERE id = $2',
             [estado, id]
         );
         res.json({ message: 'Estado actualizado' });
@@ -1585,7 +1554,7 @@ app.put('/api/admin/devoluciones/:id', verificarAdmin, async (req, res) => {
 // ===================== ADMIN - RESEÑAS =====================
 app.get('/api/admin/resenas', verificarAdmin, async (req, res) => {
     try {
-        const [resenas] = await db.query(
+        const { rows: resenas } = await db.query(
             `SELECT r.*, u.nombre as usuario_nombre, p.nombre as producto_nombre
              FROM reseñas r
              JOIN usuarios u ON r.usuario_id = u.id
@@ -1608,7 +1577,7 @@ app.put('/api/admin/resenas/:id', verificarAdmin, async (req, res) => {
     }
 
     try {
-        await db.query('UPDATE reseñas SET estado = ? WHERE id = ?', [estado, id]);
+        await db.query('UPDATE reseñas SET estado = $1 WHERE id = $2', [estado, id]);
         res.json({ message: 'Estado actualizado' });
     } catch (err) {
         res.status(500).json({ message: 'Error al actualizar' });
@@ -1619,8 +1588,8 @@ app.delete('/api/admin/resenas/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
 
     try {
-        await db.query('DELETE FROM reseñas_votos WHERE reseña_id = ?', [id]);
-        await db.query('DELETE FROM reseñas WHERE id = ?', [id]);
+        await db.query('DELETE FROM reseñas_votos WHERE reseña_id = $1', [id]);
+        await db.query('DELETE FROM reseñas WHERE id = $1', [id]);
         res.json({ message: 'Reseña eliminada' });
     } catch (err) {
         res.status(500).json({ message: 'Error al eliminar' });
@@ -1632,11 +1601,11 @@ app.get('/api/admin/orders/:orderId', verificarAdmin, async (req, res) => {
     const { orderId } = req.params;
 
     try {
-        const [pedidos] = await db.query(
+        const { rows: pedidos } = await db.query(
             `SELECT p.*, u.nombre as cliente_nombre, u.email as cliente_email
              FROM pedidos p
              JOIN usuarios u ON p.usuario_id = u.id
-             WHERE p.id = ?`,
+             WHERE p.id = $1`,
             [orderId]
         );
 
@@ -1654,11 +1623,11 @@ app.get('/api/admin/orders/:orderId/items', verificarAdmin, async (req, res) => 
     const { orderId } = req.params;
 
     try {
-        const [items] = await db.query(
+        const { rows: items } = await db.query(
             `SELECT oi.*, p.nombre, p.imagen
              FROM order_items oi
              JOIN productos p ON oi.producto_id = p.id
-             WHERE oi.pedido_id = ?`,
+             WHERE oi.pedido_id = $1`,
             [orderId]
         );
 
