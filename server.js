@@ -92,6 +92,7 @@ const corsOptions = {
         ? [
             'https://fronted-j3e4vw331-guilleriveraas-projects.vercel.app',
             'https://fronted-seven-chi.vercel.app',
+            'https://fronted-3aeae51hi-guilleriveraas-projects.vercel.app', // ← AÑADE ESTA NUEVA
             'https://fronted.vercel.app'
           ]
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
