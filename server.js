@@ -86,12 +86,13 @@ app.disable('x-powered-by');
 console.log('✅ x-powered-by deshabilitado');
 
 // 3. Configuración de CORS
+// 3. Configuración de CORS
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
         ? [
             'https://fronted-j3e4vw331-guilleriveraas-projects.vercel.app',
-            'https://fronted.vercel.app',
-            'https://*.vercel.app'
+            'https://fronted-seven-chi.vercel.app',
+            'https://fronted.vercel.app'
           ]
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -99,6 +100,11 @@ const corsOptions = {
     credentials: true,
     optionsSuccessStatus: 200
 };
+
+// IMPORTANTE: Manejar preflight requests
+app.options('*', cors(corsOptions));
+app.use(cors(corsOptions));
+console.log('✅ CORS configurado');
 
 // IMPORTANTE: Añade esto para manejar preflight requests
 app.options('*', cors(corsOptions));
