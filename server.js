@@ -229,7 +229,7 @@ app.post('/api/register',
     [
         body('nombre').notEmpty().withMessage('El nombre es obligatorio').trim().escape(),
         body('email').isEmail().withMessage('Email inválido').normalizeEmail(),
-        body('contraseña').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
+        body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
     ],
     async (req, res) => {
         console.log('📝 [REGISTER] Ruta llamada');
@@ -242,7 +242,7 @@ app.post('/api/register',
             });
         }
 
-        const { nombre, email, contraseña } = req.body;
+        const { nombre, email, password } = req.body;
 
         try {
             console.log(`🔍 [REGISTER] Validando email: ${email}`);
@@ -273,11 +273,11 @@ app.post('/api/register',
             }
 
             console.log('🔐 [REGISTER] Hasheando contraseña');
-            const hashedPassword = await bcrypt.hash(contraseña, 10);
+            const hashedPassword = await bcrypt.hash(password, 10);
             
             console.log('📦 [REGISTER] Insertando usuario');
             const { rows: newUser } = await db.query(
-                'INSERT INTO usuarios (nombre, email, contraseña) VALUES ($1, $2, $3) RETURNING id',
+                'INSERT INTO usuarios (nombre, email, password) VALUES ($1, $2, $3) RETURNING id',
                 [nombre, email, hashedPassword]
             );
 
@@ -339,7 +339,7 @@ console.log('✅ Ruta /api/user/is-admin configurada');
 app.post('/api/login',
     [
         body('email').isEmail().withMessage('Email inválido').normalizeEmail(),
-        body('contraseña').notEmpty().withMessage('La contraseña es obligatoria')
+        body('password').notEmpty().withMessage('La contraseña es obligatoria')
     ],
     async (req, res) => {
         console.log('🔐 [LOGIN] Ruta llamada');
@@ -349,7 +349,7 @@ app.post('/api/login',
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { email, contraseña } = req.body;
+        const { email, password } = req.body;
 
         try {
             console.log('🔍 [LOGIN] Buscando usuario:', email);
@@ -365,7 +365,7 @@ app.post('/api/login',
 
             const user = rows[0];
             console.log('✅ [LOGIN] Usuario encontrado, verificando contraseña');
-            const valid = await bcrypt.compare(contraseña, user.contraseña);
+            const valid = await bcrypt.compare(password, user.password);
 
             if (!valid) {
                 console.log('❌ [LOGIN] Contraseña incorrecta');
@@ -478,7 +478,7 @@ app.post('/api/users/change-password', async (req, res) => {
         const { currentPassword, newPassword } = req.body;
 
         const { rows } = await db.query(
-            'SELECT contraseña FROM usuarios WHERE id = $1',
+            'SELECT password FROM usuarios WHERE id = $1',
             [decoded.userId]
         );
 
@@ -487,7 +487,7 @@ app.post('/api/users/change-password', async (req, res) => {
             return res.status(404).json({ message: 'Usuario no encontrado' });
         }
 
-        const valid = await bcrypt.compare(currentPassword, rows[0].contraseña);
+        const valid = await bcrypt.compare(currentPassword, rows[0].password);
         
         if (!valid) {
             console.log('❌ [CHANGE-PASSWORD] Contraseña actual incorrecta');
@@ -496,7 +496,7 @@ app.post('/api/users/change-password', async (req, res) => {
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await db.query(
-            'UPDATE usuarios SET contraseña = $1 WHERE id = $2',
+            'UPDATE usuarios SET password = $1 WHERE id = $2',
             [hashedPassword, decoded.userId]
         );
 
