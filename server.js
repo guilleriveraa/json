@@ -85,14 +85,11 @@ console.log('✅ Helmet configurado');
 app.disable('x-powered-by');
 console.log('✅ x-powered-by deshabilitado');
 
-// 3. Configuración de CORS
-// 3. Configuración de CORS
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
         ? [
             'https://fronted-j3e4vw331-guilleriveraas-projects.vercel.app',
-            'https://fronted-seven-chi.vercel.app',
-            'https://fronted-3aeae51hi-guilleriveraas-projects.vercel.app', // ← AÑADE ESTA NUEVA
+            'https://fronted-seven-chi.vercel.app',  // ← AÑADE ESTA
             'https://fronted.vercel.app'
           ]
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
