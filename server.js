@@ -87,11 +87,7 @@ console.log('✅ x-powered-by deshabilitado');
 
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
-        ? [
-            'https://fronted-j3e4vw331-guilleriveraas-projects.vercel.app',
-            'https://fronted-seven-chi.vercel.app',  // ← AÑADE ESTA
-            'https://fronted.vercel.app'
-          ]
+        ? [/\.vercel\.app$/]  // Acepta cualquier subdominio de vercel.app
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -99,15 +95,10 @@ const corsOptions = {
     optionsSuccessStatus: 200
 };
 
-// IMPORTANTE: Manejar preflight requests
+// Manejar preflight requests
 app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
-console.log('✅ CORS configurado');
-
-// IMPORTANTE: Añade esto para manejar preflight requests
-app.options('*', cors(corsOptions));
-app.use(cors(corsOptions));
-console.log('✅ CORS configurado');
+console.log('✅ CORS configurado con comodín para Vercel');
 
 // 4. Rate Limiting
 const limiter = rateLimit({
