@@ -223,14 +223,29 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
                 console.log('⚠️ Pedido ya existente (stripe_session_id duplicado)');
             }
 
-            // 5. VACIAR CARRITO (SIEMPRE)
-            console.log('🧹 Intentando vaciar carrito...');
-            const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-            console.log(`🧹 Filas eliminadas: ${deleteResult.rowCount}`);
-            console.log('✅ Proceso de vaciado completado');
+            // 5. VACIAR CARRITO - CON LOGS EXHAUSTIVOS
+            console.log('🧹 [DEBUG] Entrando en la sección de vaciado de carrito...');
+            console.log(`🧹 [DEBUG] Intentando vaciar carrito con ID: ${carritoId} (tipo: ${typeof carritoId})`);
 
-            console.log(`✅ Webhook procesado completamente`);
-
+            if (!carritoId) {
+                console.log('❌ [DEBUG] ERROR: carritoId es undefined o null. No se puede vaciar.');
+            } else {
+                try {
+                    console.log(`🧹 [DEBUG] Ejecutando: DELETE FROM cart_items WHERE carrito_id = ${carritoId}`);
+                    const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+                    console.log(`🧹 [DEBUG] Resultado de la consulta:`, deleteResult);
+                    console.log(`🧹 [DEBUG] Filas eliminadas: ${deleteResult.rowCount}`);
+                    
+                    if (deleteResult.rowCount > 0) {
+                        console.log('✅ ¡CARRITO VACIADO CON ÉXITO!');
+                    } else {
+                        console.log('⚠️ No se eliminó ninguna fila. ¿El carrito ya estaba vacío o no existía?');
+                    }
+                } catch (err) {
+                    console.error('❌ [DEBUG] Error GORDO al intentar vaciar el carrito:', err);
+                }
+            }
+            console.log('🧹 [DEBUG] Fin de la sección de vaciado de carrito.\n');
         } catch (err) {
             console.error('❌ Error en webhook:', err);
         }
