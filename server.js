@@ -2132,6 +2132,47 @@ app.get('/api/admin/orders/:orderId/items', verificarAdmin, async (req, res) => 
 });
 console.log('✅ Ruta GET /api/admin/orders/:orderId/items configurada');
 
+// ===== RUTA DE EMERGENCIA PARA VACIAR CARRITO MANUALMENTE =====
+app.post('/api/emergency-clear-cart', async (req, res) => {
+    console.log('🚨 EMERGENCY CLEAR CART CALLED');
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const usuarioId = decoded.userId;
+        
+        console.log(`🚨 Buscando carrito para usuario ${usuarioId}`);
+        const { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
+            [usuarioId]
+        );
+
+        if (carrito.length === 0) {
+            return res.json({ message: 'No hay carrito', vaciado: false });
+        }
+
+        const carritoId = carrito[0].id;
+        console.log(`🚨 Eliminando items del carrito ${carritoId}`);
+        
+        const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+        
+        console.log(`🚨 Eliminadas ${deleteResult.rowCount} filas`);
+        res.json({ 
+            message: 'Carrito vaciado manualmente', 
+            vaciado: true,
+            filas: deleteResult.rowCount 
+        });
+
+    } catch (err) {
+        console.error('🚨 Error:', err);
+        res.status(500).json({ message: 'Error' });
+    }
+});
+
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, () =>
