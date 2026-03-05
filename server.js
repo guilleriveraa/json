@@ -127,6 +127,15 @@ console.log('⚠️ Rate limiting desactivado para pruebas');
 console.log('📡 Configurando webhook de Stripe...');
 app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
     console.log('🔔 Webhook recibido');
+    
+    // ===== NUEVOS LOGS DE DEPURACIÓN =====
+    console.log('📦 Tipo de req.body:', typeof req.body);
+    console.log('📦 req.body es Buffer?', Buffer.isBuffer(req.body));
+    console.log('📦 Longitud del body:', req.body.length);
+    console.log('📦 Primeros 100 chars:', req.body.toString('utf8').substring(0, 100));
+    console.log('📦 Stripe-Signature:', req.headers['stripe-signature']?.substring(0, 50));
+    // ======================================
+    
     const sig = req.headers['stripe-signature'];
     let event;
 
