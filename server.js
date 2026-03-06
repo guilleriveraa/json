@@ -1624,19 +1624,7 @@ app.post('/api/create-checkout-session',
             const totalFinal = Math.max(0, subtotalConDescuento + shipping);
             console.log(`💰 [CHECKOUT] Descuento: ${descuento.toFixed(2)}€, Subtotal con descuento: ${subtotalConDescuento.toFixed(2)}€, Total final: ${totalFinal.toFixed(2)}€`);
 
-            // ===== NUEVO: Construir line items incluyendo descuento explícito =====
-            let lineItems = items.map(item => ({
-                price_data: {
-                    currency: 'eur',
-                    product_data: { 
-                        name: item.nombre.substring(0, 100)
-                    },
-                    unit_amount: Math.round(parseFloat(item.precio_unitario) * 100),
-                },
-                quantity: Math.min(parseInt(item.cantidad) || 1, 99),
-            }));
-
-           // ===== Construir line items (SIN LA LÍNEA DE DESCUENTO) =====
+           // ===== Construir line items (SIN LÍNEA DE DESCUENTO NEGATIVA) =====
 let lineItems = items.map(item => ({
     price_data: {
         currency: 'eur',
@@ -1647,6 +1635,18 @@ let lineItems = items.map(item => ({
     },
     quantity: Math.min(parseInt(item.cantidad) || 1, 99),
 }));
+
+// Añadir gastos de envío si corresponde
+if (shipping > 0) {
+    lineItems.push({
+        price_data: {
+            currency: 'eur',
+            product_data: { name: 'Gastos de envío' },
+            unit_amount: Math.round(shipping * 100),
+        },
+        quantity: 1,
+    });
+}
 
 // NO AÑADIR LÍNEA DE DESCUENTO NEGATIVA (Stripe no lo permite)
 
