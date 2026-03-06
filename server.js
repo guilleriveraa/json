@@ -117,10 +117,10 @@ const authLimiter = rateLimit({
 });
 console.log('✅ Rate Limiters creados');
 
-//app.use('/api/', limiter);
-//app.use('/api/login', authLimiter);
-//app.use('/api/register', authLimiter);
-//console.log('✅ Rate Limiting aplicado');
+app.use('/api/', limiter);
+app.use('/api/login', authLimiter);
+app.use('/api/register', authLimiter);
+console.log('✅ Rate Limiting aplicado');
 console.log('⚠️ Rate limiting desactivado para pruebas');
 
 // ===== WEBHOOK DE STRIPE (VERSIÓN CORREGIDA) =====
