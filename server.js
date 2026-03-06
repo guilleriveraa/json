@@ -1341,22 +1341,30 @@ app.get('/api/puede-resenar/:productoId', verificarUsuario, async (req, res) => 
 
 // Enviar una reseña
 app.post('/api/resenas', verificarUsuario, async (req, res) => {
-    const { productoId, puntuacion, comentario } = req.body;
+    const { productoId, puntuacion, comentario, titulo } = req.body;
     const usuarioId = req.usuarioId;
 
     console.log(`⭐ [NUEVA RESEÑA] Usuario ${usuarioId}, Producto ${productoId}`);
+    console.log('📝 Datos recibidos:', { productoId, puntuacion, comentario, titulo });
 
     // Validaciones básicas
     if (!productoId || !puntuacion || puntuacion < 1 || puntuacion > 5) {
-        return res.status(400).json({ message: 'Datos inválidos' });
+        return res.status(400).json({ message: 'Datos inválidos: producto y puntuación (1-5) son obligatorios' });
+    }
+
+    if (!comentario || comentario.trim().length === 0) {
+        return res.status(400).json({ message: 'El comentario es obligatorio' });
     }
 
     try {
-        // Verificar que compró el producto
+        // Verificar que el usuario compró el producto
         const { rows: compras } = await db.query(
-            `SELECT oi.id FROM order_items oi
-             JOIN pedidos p ON oi.pedido_id = p.id
+            `SELECT p.id, oi.pedido_id 
+             FROM pedidos p
+             JOIN order_items oi ON p.id = oi.pedido_id
              WHERE p.usuario_id = $1 AND oi.producto_id = $2
+               AND p.estado IN ('entregado', 'pagado', 'enviado')
+             ORDER BY p.fecha DESC
              LIMIT 1`,
             [usuarioId, productoId]
         );
@@ -1364,6 +1372,8 @@ app.post('/api/resenas', verificarUsuario, async (req, res) => {
         if (compras.length === 0) {
             return res.status(403).json({ message: 'Debes comprar el producto para reseñarlo' });
         }
+
+        const pedidoId = compras[0].pedido_id;
 
         // Verificar que no haya reseñado ya
         const { rows: existente } = await db.query(
@@ -1375,23 +1385,28 @@ app.post('/api/resenas', verificarUsuario, async (req, res) => {
             return res.status(400).json({ message: 'Ya has reseñado este producto' });
         }
 
-        // Insertar reseña
+        // Insertar reseña con los campos CORRECTOS de tu tabla
         const { rows: nuevaResena } = await db.query(
-            `INSERT INTO reseñas (usuario_id, producto_id, puntuacion, comentario, fecha, estado)
-             VALUES ($1, $2, $3, $4, NOW(), 'pendiente')
+            `INSERT INTO reseñas 
+             (usuario_id, producto_id, pedido_id, titulo, comentario, calificacion, fecha, estado)
+             VALUES ($1, $2, $3, $4, $5, $6, NOW(), 'pendiente')
              RETURNING id`,
-            [usuarioId, productoId, puntuacion, comentario]
+            [usuarioId, productoId, pedidoId, titulo || null, comentario, puntuacion]
         );
 
         console.log(`✅ Reseña creada ID: ${nuevaResena[0].id}`);
         res.json({ 
-            message: 'Reseña enviada, pendiente de aprobación',
+            message: 'Reseña enviada correctamente. Pendiente de aprobación.',
             id: nuevaResena[0].id 
         });
 
     } catch (err) {
         console.error('❌ Error al guardar reseña:', err);
-        res.status(500).json({ message: 'Error al guardar reseña' });
+        console.error('❌ Detalle:', err.message);
+        res.status(500).json({ 
+            message: 'Error al guardar la reseña',
+            error: err.message 
+        });
     }
 });
 
