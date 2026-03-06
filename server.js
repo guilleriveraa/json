@@ -1256,6 +1256,145 @@ app.get('/api/categorias', async (req, res) => {
 });
 console.log('✅ Ruta GET /api/categorias configurada');
 
+// ===================== RESEÑAS DE PRODUCTOS (PÚBLICAS) =====================
+console.log('⭐ Configurando rutas públicas de reseñas...');
+
+// Middleware para verificar usuario (versión simple)
+async function verificarUsuario(req, res, next) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.usuarioId = decoded.userId;
+        next();
+    } catch (err) {
+        return res.status(401).json({ message: 'Token inválido' });
+    }
+}
+
+// Obtener reseñas de un producto
+app.get('/api/productos/:productoId/resenas', async (req, res) => {
+    const { productoId } = req.params;
+    console.log(`⭐ [GET RESENAS] Para producto ${productoId}`);
+
+    try {
+        const { rows: resenas } = await db.query(
+            `SELECT r.*, u.nombre as usuario_nombre 
+             FROM reseñas r
+             JOIN usuarios u ON r.usuario_id = u.id
+             WHERE r.producto_id = $1 AND r.estado = 'aprobada'
+             ORDER BY r.fecha DESC`,
+            [productoId]
+        );
+
+        console.log(`⭐ Reseñas encontradas: ${resenas.length}`);
+        res.json(resenas);
+    } catch (err) {
+        console.error('❌ Error al obtener reseñas:', err);
+        res.status(500).json({ message: 'Error al obtener reseñas' });
+    }
+});
+
+// Verificar si el usuario puede reseñar un producto
+app.get('/api/puede-resenar/:productoId', verificarUsuario, async (req, res) => {
+    const { productoId } = req.params;
+    const usuarioId = req.usuarioId;
+    
+    console.log(`⭐ [PUEDE RESEÑAR] Usuario ${usuarioId}, Producto ${productoId}`);
+
+    try {
+        // Verificar si el usuario compró el producto
+        const { rows: compras } = await db.query(
+            `SELECT oi.id FROM order_items oi
+             JOIN pedidos p ON oi.pedido_id = p.id
+             WHERE p.usuario_id = $1 
+               AND oi.producto_id = $2
+               AND p.estado IN ('entregado', 'pagado', 'enviado')
+             LIMIT 1`,
+            [usuarioId, productoId]
+        );
+
+        if (compras.length === 0) {
+            return res.json({ puedeResenar: false, mensaje: 'Debes comprar el producto primero' });
+        }
+
+        // Verificar si ya reseñó
+        const { rows: yaResenado } = await db.query(
+            'SELECT id FROM reseñas WHERE usuario_id = $1 AND producto_id = $2',
+            [usuarioId, productoId]
+        );
+
+        res.json({ 
+            puedeResenar: yaResenado.length === 0,
+            mensaje: yaResenado.length > 0 ? 'Ya has reseñado este producto' : 'Puedes reseñar'
+        });
+
+    } catch (err) {
+        console.error('❌ Error al verificar:', err);
+        res.status(500).json({ message: 'Error al verificar' });
+    }
+});
+
+// Enviar una reseña
+app.post('/api/resenas', verificarUsuario, async (req, res) => {
+    const { productoId, puntuacion, comentario } = req.body;
+    const usuarioId = req.usuarioId;
+
+    console.log(`⭐ [NUEVA RESEÑA] Usuario ${usuarioId}, Producto ${productoId}`);
+
+    // Validaciones básicas
+    if (!productoId || !puntuacion || puntuacion < 1 || puntuacion > 5) {
+        return res.status(400).json({ message: 'Datos inválidos' });
+    }
+
+    try {
+        // Verificar que compró el producto
+        const { rows: compras } = await db.query(
+            `SELECT oi.id FROM order_items oi
+             JOIN pedidos p ON oi.pedido_id = p.id
+             WHERE p.usuario_id = $1 AND oi.producto_id = $2
+             LIMIT 1`,
+            [usuarioId, productoId]
+        );
+
+        if (compras.length === 0) {
+            return res.status(403).json({ message: 'Debes comprar el producto para reseñarlo' });
+        }
+
+        // Verificar que no haya reseñado ya
+        const { rows: existente } = await db.query(
+            'SELECT id FROM reseñas WHERE usuario_id = $1 AND producto_id = $2',
+            [usuarioId, productoId]
+        );
+
+        if (existente.length > 0) {
+            return res.status(400).json({ message: 'Ya has reseñado este producto' });
+        }
+
+        // Insertar reseña
+        const { rows: nuevaResena } = await db.query(
+            `INSERT INTO reseñas (usuario_id, producto_id, puntuacion, comentario, fecha, estado)
+             VALUES ($1, $2, $3, $4, NOW(), 'pendiente')
+             RETURNING id`,
+            [usuarioId, productoId, puntuacion, comentario]
+        );
+
+        console.log(`✅ Reseña creada ID: ${nuevaResena[0].id}`);
+        res.json({ 
+            message: 'Reseña enviada, pendiente de aprobación',
+            id: nuevaResena[0].id 
+        });
+
+    } catch (err) {
+        console.error('❌ Error al guardar reseña:', err);
+        res.status(500).json({ message: 'Error al guardar reseña' });
+    }
+});
+
 // ===================== CUPONES DE DESCUENTO =====================
 app.post('/api/cupones/validar', async (req, res) => {
     console.log('🎫 [CUPON VALIDAR] Ruta llamada');
