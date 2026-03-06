@@ -1624,7 +1624,7 @@ app.post('/api/create-checkout-session',
             const totalFinal = Math.max(0, subtotalConDescuento + shipping);
             console.log(`💰 [CHECKOUT] Descuento: ${descuento.toFixed(2)}€, Subtotal con descuento: ${subtotalConDescuento.toFixed(2)}€, Total final: ${totalFinal.toFixed(2)}€`);
 
-           // ===== Construir line items (SIN LÍNEA DE DESCUENTO NEGATIVA) =====
+          // ===== Construir line items (UNA SOLA VEZ, SIN DUPLICADOS) =====
 let lineItems = items.map(item => ({
     price_data: {
         currency: 'eur',
@@ -1636,7 +1636,7 @@ let lineItems = items.map(item => ({
     quantity: Math.min(parseInt(item.cantidad) || 1, 99),
 }));
 
-// Añadir gastos de envío si corresponde
+// Añadir gastos de envío UNA SOLA VEZ
 if (shipping > 0) {
     lineItems.push({
         price_data: {
@@ -1648,29 +1648,7 @@ if (shipping > 0) {
     });
 }
 
-// NO AÑADIR LÍNEA DE DESCUENTO NEGATIVA (Stripe no lo permite)
-
-if (shipping > 0) {
-    lineItems.push({
-        price_data: {
-            currency: 'eur',
-            product_data: { name: 'Gastos de envío' },
-            unit_amount: Math.round(shipping * 100),
-        },
-        quantity: 1,
-    });
-}
-
-            if (shipping > 0) {
-                lineItems.push({
-                    price_data: {
-                        currency: 'eur',
-                        product_data: { name: 'Gastos de envío' },
-                        unit_amount: Math.round(shipping * 100),
-                    },
-                    quantity: 1,
-                });
-            }
+// IMPORTANTE: NO AÑADIR MÁS ITEMS DE ENVÍO
 
             // ===== NUEVO: Metadatos enriquecidos =====
             let sessionParams = {
