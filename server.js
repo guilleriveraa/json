@@ -1624,7 +1624,42 @@ app.post('/api/create-checkout-session',
             const totalFinal = Math.max(0, subtotalConDescuento + shipping);
             console.log(`💰 [CHECKOUT] Descuento: ${descuento.toFixed(2)}€, Subtotal con descuento: ${subtotalConDescuento.toFixed(2)}€, Total final: ${totalFinal.toFixed(2)}€`);
 
-          // ===== Construir line items (UNA SOLA VEZ, SIN DUPLICADOS) =====
+          // ===== Crear cupón en Stripe si hay descuento =====
+let discounts = [];
+if (descuento > 0 && cuponAplicado) {
+    try {
+        console.log(`🎫 Creando cupón en Stripe para: ${cuponAplicado.codigo}`);
+        
+        const cuponData = {
+            name: cuponAplicado.codigo,
+            duration: 'once',
+            max_redemptions: 1,
+            metadata: {
+                local_coupon_id: cuponAplicado.id.toString()
+            }
+        };
+
+        // Añadir el tipo de descuento correspondiente
+        if (cuponAplicado.tipo_descuento === 'porcentaje') {
+            cuponData.percent_off = cuponAplicado.valor_descuento;
+            console.log(`💰 Cupón porcentaje: ${cuponAplicado.valor_descuento}%`);
+        } else {
+            cuponData.amount_off = Math.round(cuponAplicado.valor_descuento * 100);
+            cuponData.currency = 'eur';
+            console.log(`💰 Cupón fijo: ${cuponAplicado.valor_descuento}€ (${cuponData.amount_off} céntimos)`);
+        }
+
+        const cuponStripe = await stripe.coupons.create(cuponData);
+        discounts.push({ coupon: cuponStripe.id });
+        console.log('✅ Cupón de Stripe creado con ID:', cuponStripe.id);
+        
+    } catch (stripeError) {
+        console.error('❌ Error creando cupón en Stripe:', stripeError);
+        // Si falla, continuamos sin el cupón visible (el precio final ya está calculado)
+    }
+}
+
+// ===== Construir line items (SOLO POSITIVOS) =====
 let lineItems = items.map(item => ({
     price_data: {
         currency: 'eur',
@@ -1636,7 +1671,7 @@ let lineItems = items.map(item => ({
     quantity: Math.min(parseInt(item.cantidad) || 1, 99),
 }));
 
-// Añadir gastos de envío UNA SOLA VEZ
+// Añadir gastos de envío
 if (shipping > 0) {
     lineItems.push({
         price_data: {
@@ -1648,35 +1683,35 @@ if (shipping > 0) {
     });
 }
 
-
-            // ===== NUEVO: Metadatos enriquecidos =====
-            let sessionParams = {
-                payment_method_types: ['card'],
-                line_items: lineItems,
-                mode: 'payment',
-                success_url: `${process.env.BASE_URL}/pedido-exitoso.html?session_id={CHECKOUT_SESSION_ID}`,
-                cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
-                shipping_address_collection: { allowed_countries: ['ES'] },
-                metadata: {
-                    usuarioId: String(usuarioId),
-                    carritoId: String(carritoId),
-                    subtotal: subtotal.toFixed(2),
-                    descuento: descuento.toFixed(2),
-                    descuento_tipo: cuponAplicado?.tipo_descuento || '',
-                    descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
-                    cupon_codigo: cuponAplicado?.codigo || '',
-                    subtotal_con_descuento: subtotalConDescuento.toFixed(2),
-                    shipping: shipping.toFixed(2),
-                    total: totalFinal.toFixed(2),
-                    cuponId: cuponId ? String(cuponId) : '',
-                    direccion_nombre: direccionData?.nombre || '',
-                    direccion_calle: direccionData?.calle || '',
-                    direccion_piso: direccionData?.piso || '',
-                    direccion_ciudad: direccionData?.ciudad || '',
-                    direccion_cp: direccionData?.codigo_postal || '',
-                    direccion_pais: direccionData?.pais || ''
-                },
-            };
+// ===== Crear sesión de Stripe CON descuentos visibles =====
+let sessionParams = {
+    payment_method_types: ['card'],
+    line_items: lineItems,
+    mode: 'payment',
+    discounts: discounts, // ← ESTO HACE VISIBLE EL DESCUENTO
+    success_url: `${process.env.BASE_URL}/pedido-exitoso.html?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
+    shipping_address_collection: { allowed_countries: ['ES'] },
+    metadata: {
+        usuarioId: String(usuarioId),
+        carritoId: String(carritoId),
+        subtotal: subtotal.toFixed(2),
+        descuento: descuento.toFixed(2),
+        descuento_tipo: cuponAplicado?.tipo_descuento || '',
+        descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
+        cupon_codigo: cuponAplicado?.codigo || '',
+        subtotal_con_descuento: subtotalConDescuento.toFixed(2),
+        shipping: shipping.toFixed(2),
+        total: totalFinal.toFixed(2),
+        cuponId: cuponId ? String(cuponId) : '',
+        direccion_nombre: direccionData?.nombre || '',
+        direccion_calle: direccionData?.calle || '',
+        direccion_piso: direccionData?.piso || '',
+        direccion_ciudad: direccionData?.ciudad || '',
+        direccion_cp: direccionData?.codigo_postal || '',
+        direccion_pais: direccionData?.pais || ''
+    },
+};
 
             const session = await stripe.checkout.sessions.create(sessionParams);
             console.log('✅ [CHECKOUT] Sesión de Stripe creada:', session.id);
