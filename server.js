@@ -1576,12 +1576,15 @@ app.post('/api/create-checkout-session',
             });
 
             const shipping = subtotal > 50 ? 0 : 4.99;
-            console.log(`💰 [CHECKOUT] Subtotal: ${subtotal}, Envío: ${shipping}`);
+            console.log(`💰 [CHECKOUT] Subtotal: ${subtotal.toFixed(2)}€, Envío: ${shipping.toFixed(2)}€`);
 
+            // ===== NUEVO: Cálculo mejorado de descuentos =====
             let descuento = 0;
             let cuponId = null;
+            let cuponAplicado = null;
 
             if (req.body.cuponId) {
+                console.log(`🎫 [CHECKOUT] Verificando cupón ID: ${req.body.cuponId}`);
                 const { rows: cupones } = await db.query(
                     'SELECT * FROM cupones WHERE id = $1 AND activo = TRUE AND (fecha_fin IS NULL OR fecha_fin >= NOW())',
                     [req.body.cuponId]
@@ -1589,25 +1592,39 @@ app.post('/api/create-checkout-session',
                 
                 if (cupones.length > 0) {
                     const cupon = cupones[0];
+                    console.log(`🎫 Cupón encontrado: ${cupon.codigo}, Tipo: ${cupon.tipo_descuento}, Valor: ${cupon.valor_descuento}`);
                     
-                    if (!cupon.monto_minimo || subtotal >= cupon.monto_minimo) {
-                        if (cupon.tipo_descuento === 'porcentaje') {
-                            descuento = (subtotal * cupon.valor_descuento) / 100;
-                        } else {
-                            descuento = cupon.valor_descuento;
-                        }
+                    // Verificar monto mínimo
+                    if (!cupon.monto_minimo || subtotal >= parseFloat(cupon.monto_minimo)) {
                         cuponId = cupon.id;
+                        cuponAplicado = cupon;
                         
+                        if (cupon.tipo_descuento === 'porcentaje') {
+                            descuento = (subtotal * parseFloat(cupon.valor_descuento)) / 100;
+                            console.log(`💰 Descuento porcentaje ${cupon.valor_descuento}%: ${descuento.toFixed(2)}€`);
+                        } else {
+                            descuento = parseFloat(cupon.valor_descuento);
+                            console.log(`💰 Descuento fijo: ${descuento.toFixed(2)}€`);
+                        }
+                        
+                        // No permitir descuento mayor que el subtotal
                         if (descuento > subtotal) {
                             descuento = subtotal;
+                            console.log(`💰 Descuento ajustado al subtotal: ${descuento.toFixed(2)}€`);
                         }
+                    } else {
+                        console.log(`⚠️ Monto mínimo no alcanzado: ${cupon.monto_minimo}€ > ${subtotal.toFixed(2)}€`);
                     }
+                } else {
+                    console.log(`⚠️ Cupón no válido o expirado ID: ${req.body.cuponId}`);
                 }
             }
 
-            const totalFinal = Math.max(0, subtotal - descuento + shipping);
-            console.log(`💰 [CHECKOUT] Descuento: ${descuento}, Total final: ${totalFinal}`);
+            const subtotalConDescuento = subtotal - descuento;
+            const totalFinal = Math.max(0, subtotalConDescuento + shipping);
+            console.log(`💰 [CHECKOUT] Descuento: ${descuento.toFixed(2)}€, Subtotal con descuento: ${subtotalConDescuento.toFixed(2)}€, Total final: ${totalFinal.toFixed(2)}€`);
 
+            // ===== NUEVO: Construir line items incluyendo descuento explícito =====
             let lineItems = items.map(item => ({
                 price_data: {
                     currency: 'eur',
@@ -1618,6 +1635,20 @@ app.post('/api/create-checkout-session',
                 },
                 quantity: Math.min(parseInt(item.cantidad) || 1, 99),
             }));
+
+            // Añadir línea de descuento si existe (visible para el cliente)
+            if (descuento > 0 && cuponAplicado) {
+                lineItems.push({
+                    price_data: {
+                        currency: 'eur',
+                        product_data: { 
+                            name: `Descuento: ${cuponAplicado.codigo} (${cuponAplicado.tipo_descuento === 'porcentaje' ? cuponAplicado.valor_descuento + '%' : cuponAplicado.valor_descuento + '€'})`
+                        },
+                        unit_amount: -Math.round(descuento * 100), // Negativo para restar
+                    },
+                    quantity: 1,
+                });
+            }
 
             if (shipping > 0) {
                 lineItems.push({
@@ -1630,6 +1661,7 @@ app.post('/api/create-checkout-session',
                 });
             }
 
+            // ===== NUEVO: Metadatos enriquecidos =====
             let sessionParams = {
                 payment_method_types: ['card'],
                 line_items: lineItems,
@@ -1640,10 +1672,14 @@ app.post('/api/create-checkout-session',
                 metadata: {
                     usuarioId: String(usuarioId),
                     carritoId: String(carritoId),
-                    subtotal: String(subtotal.toFixed(2)),
-                    descuento: String(descuento.toFixed(2)),
-                    shipping: String(shipping.toFixed(2)),
-                    total: String(totalFinal.toFixed(2)),
+                    subtotal: subtotal.toFixed(2),
+                    descuento: descuento.toFixed(2),
+                    descuento_tipo: cuponAplicado?.tipo_descuento || '',
+                    descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
+                    cupon_codigo: cuponAplicado?.codigo || '',
+                    subtotal_con_descuento: subtotalConDescuento.toFixed(2),
+                    shipping: shipping.toFixed(2),
+                    total: totalFinal.toFixed(2),
                     cuponId: cuponId ? String(cuponId) : '',
                     direccion_nombre: direccionData?.nombre || '',
                     direccion_calle: direccionData?.calle || '',
