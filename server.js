@@ -1648,7 +1648,7 @@ if (shipping > 0) {
     });
 }
 
-// IMPORTANTE: NO AÑADIR MÁS ITEMS DE ENVÍO
+// IMPORTANTE: NO AÑADIR MÁS ITEMS DE ENVÍO, DESCUENTOS O SIMILARES AQUÍ. SOLO LOS PRODUCTOS Y EL ENVÍO. LOS DESCUENTOS SE MANEJAN EN LOS METADATOS Y EN EL BACKEND, NO COMO ITEMS SEPARADOS.
 
             // ===== NUEVO: Metadatos enriquecidos =====
             let sessionParams = {
