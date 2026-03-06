@@ -85,6 +85,7 @@ console.log('✅ Helmet configurado');
 app.disable('x-powered-by');
 console.log('✅ x-powered-by deshabilitado');
 
+// ===== CONFIGURACIÓN CORS MEJORADA =====
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
         ? [/\.vercel\.app$/]  // Acepta cualquier subdominio de vercel.app
@@ -95,8 +96,7 @@ const corsOptions = {
     optionsSuccessStatus: 200
 };
 
-// Manejar preflight requests
-app.options('*', cors(corsOptions));
+// Aplicar CORS una sola vez (esto ya maneja OPTIONS automáticamente)
 app.use(cors(corsOptions));
 console.log('✅ CORS configurado con comodín para Vercel');
 
@@ -127,7 +127,7 @@ console.log('⚠️ Rate limiting desactivado para pruebas');
 console.log('📡 Configurando webhook de Stripe...');
 
 // --- NUEVO: Asegurar que el body se mantiene como raw ---
-app.post('/webhook', express.raw({type: 'application/json'}), (req, res) => {
+app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) => {
   // --- NUEVO: Extraer la firma y el cuerpo raw antes de cualquier otra operación ---
   const sig = req.headers['stripe-signature'];
   // --- NUEVO: req.body es un Buffer. Lo pasamos directamente a constructEvent ---
