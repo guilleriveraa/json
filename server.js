@@ -125,7 +125,10 @@ console.log('⚠️ Rate limiting desactivado para pruebas');
 
 // ===== WEBHOOK DE STRIPE (VERSIÓN CORREGIDA) =====
 console.log('📡 Configurando webhook de Stripe...');
-
+// LOG TEMPORAL PARA VER QUÉ SECRETO USA EL SERVIDOR
+console.log('🔑 STRIPE_WEBHOOK_SECRET cargado:', process.env.STRIPE_WEBHOOK_SECRET ? '✅ DEFINIDO' : '❌ NO DEFINIDO');
+console.log('🔑 Longitud del secreto:', process.env.STRIPE_WEBHOOK_SECRET?.length);
+console.log('🔑 Primeros 10 chars:', process.env.STRIPE_WEBHOOK_SECRET?.substring(0, 10) + '...');
 // --- NUEVO: Asegurar que el body se mantiene como raw ---
 app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) => {
   // --- NUEVO: Extraer la firma y el cuerpo raw antes de cualquier otra operación ---
