@@ -1636,19 +1636,30 @@ app.post('/api/create-checkout-session',
                 quantity: Math.min(parseInt(item.cantidad) || 1, 99),
             }));
 
-            // Añadir línea de descuento si existe (visible para el cliente)
-            if (descuento > 0 && cuponAplicado) {
-                lineItems.push({
-                    price_data: {
-                        currency: 'eur',
-                        product_data: { 
-                            name: `Descuento: ${cuponAplicado.codigo} (${cuponAplicado.tipo_descuento === 'porcentaje' ? cuponAplicado.valor_descuento + '%' : cuponAplicado.valor_descuento + '€'})`
-                        },
-                        unit_amount: -Math.round(descuento * 100), // Negativo para restar
-                    },
-                    quantity: 1,
-                });
-            }
+           // ===== Construir line items (SIN LA LÍNEA DE DESCUENTO) =====
+let lineItems = items.map(item => ({
+    price_data: {
+        currency: 'eur',
+        product_data: { 
+            name: item.nombre.substring(0, 100)
+        },
+        unit_amount: Math.round(parseFloat(item.precio_unitario) * 100),
+    },
+    quantity: Math.min(parseInt(item.cantidad) || 1, 99),
+}));
+
+// NO AÑADIR LÍNEA DE DESCUENTO NEGATIVA (Stripe no lo permite)
+
+if (shipping > 0) {
+    lineItems.push({
+        price_data: {
+            currency: 'eur',
+            product_data: { name: 'Gastos de envío' },
+            unit_amount: Math.round(shipping * 100),
+        },
+        quantity: 1,
+    });
+}
 
             if (shipping > 0) {
                 lineItems.push({
