@@ -582,6 +582,7 @@ app.post('/api/contact',
     ],
     async (req, res) => {
         console.log('📧 [CONTACT] Ruta llamada');
+        
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             console.log('❌ [CONTACT] Errores de validación:', errors.array());
@@ -591,6 +592,7 @@ app.post('/api/contact',
         const { name, email, subject, message } = req.body;
 
         try {
+            // 1. Guardar en base de datos (siempre funciona)
             console.log('📦 [CONTACT] Guardando mensaje en BD');
             await db.query(
                 'INSERT INTO contact_messages (nombre, email, asunto, mensaje) VALUES ($1, $2, $3, $4)',
@@ -598,322 +600,68 @@ app.post('/api/contact',
             );
             console.log('✅ [CONTACT] Mensaje guardado en BD');
 
-           const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-    },
-    tls: {
-        rejectUnauthorized: false,
-        ciphers: 'SSLv3'
-    },
-    connectionTimeout: 15000, // 15 segundos de timeout de conexión
-    socketTimeout: 15000,      // 15 segundos de timeout de socket
-    greetingTimeout: 10000,    // 10 segundos de timeout de saludo
-    debug: true                // Activar logs detallados
-});;
+            // 2. Intentar enviar email en segundo plano (no bloquea la respuesta)
+            enviarEmailEnSegundoPlano(name, email, subject, message).catch(e => {
+                console.log('⚠️ Email en segundo plano falló (no crítico):', e.message);
+            });
 
-            await transporter.verify();
-            console.log('✅ [CONTACT] Conexión SMTP verificada');
-
-            const mailOptions = {
-    from: `"Formulario Web" <${process.env.EMAIL_USER}>`,
-    to: 'guilleriveraa12@gmail.com',
-    replyTo: email,
-    subject: `📬 ${subject || 'Nuevo mensaje'} de ${name}`,
-    html: `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                }
-                body {
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                    line-height: 1.6;
-                    background-color: #f4f4f4;
-                    padding: 20px;
-                }
-                .container {
-                    max-width: 600px;
-                    margin: 0 auto;
-                    background-color: #ffffff;
-                    border-radius: 16px;
-                    overflow: hidden;
-                    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
-                    animation: slideIn 0.5s ease-out;
-                }
-                @keyframes slideIn {
-                    from {
-                        opacity: 0;
-                        transform: translateY(20px);
-                    }
-                    to {
-                        opacity: 1;
-                        transform: translateY(0);
-                    }
-                }
-                .header {
-                    background: linear-gradient(135deg, #d81b60 0%, #c2185b 100%);
-                    color: white;
-                    padding: 30px 25px;
-                    text-align: center;
-                }
-                .header h1 {
-                    margin: 0;
-                    font-size: 28px;
-                    font-weight: 600;
-                    letter-spacing: -0.5px;
-                }
-                .header p {
-                    margin: 10px 0 0;
-                    font-size: 16px;
-                    opacity: 0.9;
-                }
-                .header i {
-                    font-size: 40px;
-                    margin-bottom: 15px;
-                    display: block;
-                }
-                .content {
-                    padding: 30px 25px;
-                }
-                .message-info {
-                    background: #f8f9fa;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-bottom: 25px;
-                    border-left: 4px solid #d81b60;
-                }
-                .field {
-                    margin-bottom: 20px;
-                }
-                .field:last-child {
-                    margin-bottom: 0;
-                }
-                .label {
-                    font-weight: 600;
-                    color: #555;
-                    font-size: 14px;
-                    text-transform: uppercase;
-                    letter-spacing: 0.5px;
-                    margin-bottom: 5px;
-                    display: flex;
-                    align-items: center;
-                    gap: 8px;
-                }
-                .label i {
-                    color: #d81b60;
-                    width: 20px;
-                }
-                .value {
-                    background: white;
-                    padding: 15px;
-                    border-radius: 10px;
-                    color: #333;
-                    font-size: 15px;
-                    border: 1px solid #e0e0e0;
-                    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
-                }
-                .message-box {
-                    background: #fff3e0;
-                    border-radius: 12px;
-                    padding: 20px;
-                    margin-top: 25px;
-                }
-                .message-box .label {
-                    color: #e65100;
-                }
-                .message-box .value {
-                    background: #ffffff;
-                    border-color: #ffb74d;
-                    white-space: pre-wrap;
-                    font-style: italic;
-                }
-                .footer {
-                    background: #f8f9fa;
-                    padding: 25px;
-                    text-align: center;
-                    border-top: 1px solid #e0e0e0;
-                }
-                .footer p {
-                    color: #666;
-                    font-size: 14px;
-                    margin: 5px 0;
-                }
-                .footer .social-links {
-                    margin: 15px 0 10px;
-                }
-                .footer .social-links a {
-                    display: inline-flex;
-                    align-items: center;
-                    justify-content: center;
-                    width: 36px;
-                    height: 36px;
-                    background: white;
-                    color: #d81b60;
-                    border-radius: 50%;
-                    margin: 0 5px;
-                    text-decoration: none;
-                    transition: all 0.3s ease;
-                    border: 1px solid #e0e0e0;
-                }
-                .footer .social-links a:hover {
-                    background: #d81b60;
-                    color: white;
-                    transform: translateY(-2px);
-                }
-                .footer .social-links i {
-                    font-size: 16px;
-                }
-                .divider {
-                    height: 2px;
-                    background: linear-gradient(to right, transparent, #d81b60, transparent);
-                    margin: 20px 0;
-                }
-                .badge {
-                    display: inline-block;
-                    background: #d81b60;
-                    color: white;
-                    padding: 4px 12px;
-                    border-radius: 20px;
-                    font-size: 12px;
-                    font-weight: 600;
-                    letter-spacing: 0.5px;
-                    text-transform: uppercase;
-                }
-                @media (max-width: 600px) {
-                    .container {
-                        border-radius: 12px;
-                    }
-                    .header {
-                        padding: 25px 20px;
-                    }
-                    .header h1 {
-                        font-size: 24px;
-                    }
-                    .content {
-                        padding: 20px;
-                    }
-                    .message-info {
-                        padding: 15px;
-                    }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <div class="header">
-                    <i class="fas fa-envelope-open-text"></i>
-                    <h1>📬 Nuevo mensaje de contacto</h1>
-                    <p>Has recibido un nuevo mensaje desde el formulario de contacto</p>
-                </div>
-                
-                <div class="content">
-                    <div class="badge" style="margin-bottom: 20px;">Información del remitente</div>
-                    
-                    <div class="message-info">
-                        <div class="field">
-                            <div class="label">
-                                <i class="fas fa-user"></i>
-                                Nombre:
-                            </div>
-                            <div class="value">${name}</div>
-                        </div>
-                        
-                        <div class="field">
-                            <div class="label">
-                                <i class="fas fa-envelope"></i>
-                                Email:
-                            </div>
-                            <div class="value">
-                                <a href="mailto:${email}" style="color: #d81b60; text-decoration: none;">${email}</a>
-                            </div>
-                        </div>
-                        
-                        <div class="field">
-                            <div class="label">
-                                <i class="fas fa-tag"></i>
-                                Asunto:
-                            </div>
-                            <div class="value">${subject || 'Sin asunto'}</div>
-                        </div>
-                        
-                        <div class="field">
-                            <div class="label">
-                                <i class="fas fa-calendar"></i>
-                                Fecha:
-                            </div>
-                            <div class="value">${new Date().toLocaleString('es-ES', {
-                                year: 'numeric',
-                                month: 'long',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                            })}</div>
-                        </div>
-                    </div>
-
-                    <div class="divider"></div>
-
-                    <div class="badge" style="margin-bottom: 20px;">Mensaje</div>
-                    
-                    <div class="message-box">
-                        <div class="field">
-                            <div class="value">${message.replace(/\n/g, '<br>')}</div>
-                        </div>
-                    </div>
-
-                    <div style="background: #f1f8e9; border-radius: 12px; padding: 15px; margin-top: 25px; border-left: 4px solid #4caf50;">
-                        <div style="display: flex; align-items: center; gap: 10px; color: #2e7d32;">
-                            <i class="fas fa-clock" style="font-size: 20px;"></i>
-                            <span style="font-weight: 600;">Tiempo de respuesta estimado: 24-48 horas</span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="footer">
-                    <div class="social-links">
-                        <a href="https://www.facebook.com/SalamancaVivelaES" target="_blank">
-                            <i class="fab fa-facebook-f"></i>
-                        </a>
-                        <a href="https://www.instagram.com/salamancavivela/" target="_blank">
-                            <i class="fab fa-instagram"></i>
-                        </a>
-                        <a href="https://x.com/SalamancaVivela" target="_blank">
-                            <i class="fab fa-twitter"></i>
-                        </a>
-                        <a href="https://www.tiktok.com/@salamancavivela" target="_blank">
-                            <i class="fab fa-tiktok"></i>
-                        </a>
-                    </div>
-                    <p style="font-weight: 600; color: #333;">© ${new Date().getFullYear()} Salamanca Vive la</p>
-                    <p style="font-size: 12px;">Este mensaje fue enviado desde el formulario de contacto de tu tienda online.</p>
-                </div>
-            </div>
-        </body>
-        </html>
-    `
-};
-
-            await transporter.sendMail(mailOptions);
-            console.log('✅ [CONTACT] Email enviado');
-            res.json({ message: "Mensaje enviado correctamente" });
+            // 3. Responder inmediatamente al usuario
+            res.json({ 
+                message: "Mensaje recibido correctamente. Te contactaremos pronto.",
+                guardado: true
+            });
 
         } catch (err) {
-            console.error('❌ [CONTACT] Error:', err);
-            res.status(500).json({ message: "Error al enviar el mensaje" });
+            console.error('❌ [CONTACT] Error crítico:', err);
+            res.status(500).json({ message: "Error al procesar el mensaje" });
         }
     }
 );
+
+// Función para enviar email en segundo plano
+async function enviarEmailEnSegundoPlano(name, email, subject, message) {
+    try {
+        console.log('📧 Enviando email en segundo plano...');
+        
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS
+            },
+            tls: { rejectUnauthorized: false },
+            connectionTimeout: 10000,  // 10 segundos máximo
+            socketTimeout: 10000
+        });
+
+        const mailOptions = {
+            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
+            to: 'guilleriveraa12@gmail.com',
+            replyTo: email,
+            subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
+            text: `Nombre: ${name}\nEmail: ${email}\nAsunto: ${subject || 'Sin asunto'}\n\nMensaje:\n${message}`,
+            html: `
+                <h2>Nuevo mensaje de contacto</h2>
+                <p><strong>Nombre:</strong> ${name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+                <p><strong>Asunto:</strong> ${subject || 'Sin asunto'}</p>
+                <p><strong>Mensaje:</strong></p>
+                <p>${message.replace(/\n/g, '<br>')}</p>
+                <hr>
+                <p style="color: #666;">Recibido el ${new Date().toLocaleString('es-ES')}</p>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Email enviado correctamente');
+        
+    } catch (err) {
+        console.log('⚠️ Error en email (no crítico):', err.message);
+    }
+}
+
 console.log('✅ Ruta /api/contact configurada');
 
 // ===================== CARRITO =====================
