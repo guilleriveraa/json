@@ -1935,6 +1935,61 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
 });
 console.log('✅ Ruta GET /api/orders/:orderId/items configurada');
 
+// ===================== PEDIDOS - RECOGIDA EN TIENDA =====================
+app.post('/api/pedidos/recogida-tienda', async (req, res) => {
+    console.log('🏪 [RECOGIDA TIENDA] Ruta llamada');
+    
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const usuarioId = decoded.userId;
+        
+        const { items, subtotal } = req.body;
+        
+        if (!items || items.length === 0) {
+            return res.status(400).json({ message: 'Carrito vacío' });
+        }
+        
+        // Generar código de recogida (opcional)
+        const codigoRecogida = 'REC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        
+        // Insertar pedido con estado pendiente y método pago en tienda
+        const { rows: pedidoRows } = await db.query(
+            `INSERT INTO pedidos 
+             (usuario_id, total, estado, fecha, direccion_envio, metodo_pago, estado_pago, codigo_recogida) 
+             VALUES ($1, $2, 'pendiente', NOW(), 'Recoger en tienda', 'pago_en_tienda', 'pendiente', $3)
+             RETURNING id`,
+            [usuarioId, subtotal, codigoRecogida]
+        );
+        
+        const pedidoId = pedidoRows[0].id;
+        
+        // Guardar items del pedido
+        for (const item of items) {
+            await db.query(
+                'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio) VALUES ($1, $2, $3, $4)',
+                [pedidoId, item.id, item.quantity, item.price]
+            );
+        }
+        
+        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
+        
+        res.json({ 
+            message: 'Pedido de recogida creado correctamente',
+            pedidoId: pedidoId,
+            codigoRecogida: codigoRecogida
+        });
+        
+    } catch (err) {
+        console.error('❌ Error en recogida tienda:', err);
+        res.status(500).json({ message: 'Error al crear pedido de recogida' });
+    }
+});
 
 // ===================== ADMIN - RUTAS PARA EL PANEL =====================
 console.log('👑 Configurando rutas de administración...');
