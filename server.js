@@ -36,6 +36,7 @@ console.log('✅ Stripe cargado');
 
 const app = express();
 console.log('✅ App creada');
+app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
