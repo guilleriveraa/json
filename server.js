@@ -453,6 +453,254 @@ app.post('/api/login',
 );
 console.log('✅ Ruta /api/login configurada');
 
+// ===================== RECUPERACIÓN DE CONTRASEÑA =====================
+console.log('🔐 Configurando rutas de recuperación de contraseña...');
+
+const crypto = require('crypto'); // Para generar tokens seguros
+
+// 1. SOLICITAR RECUPERACIÓN (enviar email con token)
+app.post('/api/auth/forgot-password', [
+    body('email').isEmail().withMessage('Email inválido').normalizeEmail()
+], async (req, res) => {
+    console.log('🔑 [FORGOT PASSWORD] Ruta llamada');
+    
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { email } = req.body;
+
+    try {
+        // Buscar usuario por email
+        const { rows: usuarios } = await db.query(
+            'SELECT id FROM usuarios WHERE email = $1',
+            [email]
+        );
+
+        // Por seguridad, siempre devolvemos el mismo mensaje aunque el email no exista
+        // Esto evita que alguien pueda descubrir qué emails están registrados
+        if (usuarios.length === 0) {
+            console.log('⚠️ Email no encontrado, pero devolvemos OK por seguridad');
+            return res.json({ 
+                message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.' 
+            });
+        }
+
+        const usuarioId = usuarios[0].id;
+
+        // Eliminar tokens anteriores no usados del mismo usuario
+        await db.query(
+            'DELETE FROM password_reset_tokens WHERE usuario_id = $1 AND usado = FALSE',
+            [usuarioId]
+        );
+
+        // Generar token seguro
+        const token = crypto.randomBytes(32).toString('hex');
+        
+        // Token válido por 1 hora
+        const expiresAt = new Date();
+        expiresAt.setHours(expiresAt.getHours() + 1);
+
+        // Guardar token en BD
+        await db.query(
+            'INSERT INTO password_reset_tokens (usuario_id, token, expires_at) VALUES ($1, $2, $3)',
+            [usuarioId, token, expiresAt]
+        );
+
+        // Construir enlace de recuperación
+        const resetLink = `${process.env.BASE_URL}/reset-password.html?token=${token}`;
+
+        // Enviar email con el enlace
+        await enviarEmailRecuperacion(email, resetLink);
+
+        console.log('✅ Email de recuperación enviado a:', email);
+        res.json({ 
+            message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.' 
+        });
+
+    } catch (err) {
+        console.error('❌ Error en forgot-password:', err);
+        res.status(500).json({ message: 'Error al procesar la solicitud' });
+    }
+});
+
+// 2. VERIFICAR TOKEN (cuando el usuario hace clic en el enlace)
+app.get('/api/auth/verify-reset-token', async (req, res) => {
+    console.log('🔑 [VERIFY TOKEN] Ruta llamada');
+    
+    const { token } = req.query;
+
+    if (!token) {
+        return res.status(400).json({ message: 'Token requerido' });
+    }
+
+    try {
+        const { rows: tokens } = await db.query(
+            `SELECT rt.id, rt.usuario_id, u.email 
+             FROM password_reset_tokens rt
+             JOIN usuarios u ON rt.usuario_id = u.id
+             WHERE rt.token = $1 
+               AND rt.expires_at > NOW() 
+               AND rt.usado = FALSE`,
+            [token]
+        );
+
+        if (tokens.length === 0) {
+            return res.status(400).json({ 
+                valid: false, 
+                message: 'Token inválido o expirado' 
+            });
+        }
+
+        res.json({ 
+            valid: true, 
+            email: tokens[0].email 
+        });
+
+    } catch (err) {
+        console.error('❌ Error verificando token:', err);
+        res.status(500).json({ message: 'Error al verificar token' });
+    }
+});
+
+// 3. REESTABLECER CONTRASEÑA
+app.post('/api/auth/reset-password', [
+    body('token').notEmpty().withMessage('Token requerido'),
+    body('newPassword').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
+], async (req, res) => {
+    console.log('🔑 [RESET PASSWORD] Ruta llamada');
+    
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { token, newPassword } = req.body;
+
+    try {
+        // Verificar token en transacción
+        const { rows: tokens } = await db.query(
+            `SELECT rt.id, rt.usuario_id 
+             FROM password_reset_tokens rt
+             WHERE rt.token = $1 
+               AND rt.expires_at > NOW() 
+               AND rt.usado = FALSE`,
+            [token]
+        );
+
+        if (tokens.length === 0) {
+            return res.status(400).json({ 
+                message: 'Token inválido o expirado' 
+            });
+        }
+
+        const tokenId = tokens[0].id;
+        const usuarioId = tokens[0].usuario_id;
+
+        // Hashear nueva contraseña
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+        // Actualizar contraseña y marcar token como usado (en transacción)
+        await db.query('BEGIN');
+        
+        await db.query(
+            'UPDATE usuarios SET password = $1 WHERE id = $2',
+            [hashedPassword, usuarioId]
+        );
+        
+        await db.query(
+            'UPDATE password_reset_tokens SET usado = TRUE WHERE id = $1',
+            [tokenId]
+        );
+        
+        await db.query('COMMIT');
+
+        console.log('✅ Contraseña actualizada para usuario:', usuarioId);
+        res.json({ 
+            message: 'Contraseña actualizada correctamente' 
+        });
+
+    } catch (err) {
+        await db.query('ROLLBACK');
+        console.error('❌ Error en reset-password:', err);
+        res.status(500).json({ message: 'Error al restablecer la contraseña' });
+    }
+});
+
+// Función auxiliar para enviar email de recuperación
+async function enviarEmailRecuperacion(email, resetLink) {
+    try {
+        const transporter = nodemailer.createTransport({
+            host: 'smtp.gmail.com',
+            port: 587,
+            secure: false,
+            auth: {
+                user: process.env.EMAIL_USER,
+                pass: process.env.EMAIL_PASS
+            },
+            tls: { rejectUnauthorized: false }
+        });
+
+        const mailOptions = {
+            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
+            to: email,
+            subject: 'Recuperación de contraseña - SalamancaVivela',
+            html: `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; background-color: #f4f4f4; padding: 20px; }
+                        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+                        .header { background: linear-gradient(135deg, #c62828 0%, #8e0000 100%); color: white; padding: 30px 25px; text-align: center; }
+                        .header h1 { margin: 0; font-size: 28px; }
+                        .content { padding: 30px 25px; }
+                        .button { display: inline-block; background: #c62828; color: white; text-decoration: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; margin: 20px 0; }
+                        .footer { background: #f8f9fa; padding: 25px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 14px; color: #666; }
+                        .warning { background: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; font-size: 14px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>Recuperación de contraseña</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en <strong>SalamancaVivela</strong>.</p>
+                            
+                            <div style="text-align: center;">
+                                <a href="${resetLink}" class="button">RESTABLECER CONTRASEÑA</a>
+                            </div>
+                            
+                            <div class="warning">
+                                <p style="margin: 0;"><strong>⚠️ Este enlace expirará en 1 hora</strong></p>
+                                <p style="margin: 5px 0 0; font-size: 13px;">Si no has solicitado este cambio, puedes ignorar este email.</p>
+                            </div>
+                            
+                            <p style="color: #666; font-size: 14px;">Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+                            <p style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; word-break: break-all;">${resetLink}</p>
+                        </div>
+                        <div class="footer">
+                            <p>&copy; ${new Date().getFullYear()} SalamancaVivela. Todos los derechos reservados.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
+            `
+        };
+
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Email de recuperación enviado a:', email);
+        
+    } catch (err) {
+        console.error('❌ Error enviando email de recuperación:', err);
+        // No lanzamos el error para no interrumpir el flujo
+    }
+}
+
 // ===================== PERFIL DE USUARIO =====================
 app.get('/api/users/me', async (req, res) => {
     console.log('👤 [PROFILE] Ruta llamada');
