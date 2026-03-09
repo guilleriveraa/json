@@ -87,16 +87,19 @@ console.log('✅ Helmet configurado');
 app.disable('x-powered-by');
 console.log('✅ x-powered-by deshabilitado');
 
-// ===== CONFIGURACIÓN CORS MEJORADA =====
+// 1. CONFIGURACIÓN CORS (DEBE IR AL PRINCIPIO)
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
-        ? [/\.vercel\.app$/]  // Acepta cualquier subdominio de vercel.app
+        ? [/\.vercel\.app$/]
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
     optionsSuccessStatus: 200
 };
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions)); // Asegurar manejo de OPTIONS
+
 
 // Aplicar CORS una sola vez (esto ya maneja OPTIONS automáticamente)
 app.use(cors(corsOptions));
