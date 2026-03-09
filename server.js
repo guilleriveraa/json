@@ -646,7 +646,7 @@ async function enviarEmailRecuperacion(email, resetLink) {
         
         const { data, error } = await resend.emails.send({
             from: 'SalamancaVivela <onboarding@resend.dev>', // Temporal (luego pondrás tu dominio)
-            to: ['guilleriveraa12@gmail.com'], // email del usuario
+            to: ['delivered@resend.dev'], // Temporal (luego pondrás el email del usuario)
             subject: 'Recuperación de contraseña - SalamancaVivela',
             html: `
                 <!DOCTYPE html>
