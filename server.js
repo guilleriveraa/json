@@ -18,7 +18,8 @@ console.log('✅ Nodemailer cargado');
 
 require('dotenv').config();
 console.log('✅ Dotenv configurado');
-
+const { Resend } = require('resend');
+const resend = new Resend(process.env.RESEND_API_KEY);
 const validateEmail = require('./services/emailValidation');
 console.log('✅ EmailValidation cargado');
 
@@ -627,38 +628,69 @@ app.post('/api/auth/reset-password', [
     }
 });
 
-// Función auxiliar para enviar email de recuperación
+// Función auxiliar para enviar email de recuperación con Resend
 async function enviarEmailRecuperacion(email, resetLink) {
     try {
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            },
-            tls: { rejectUnauthorized: false }
-        });
-
-        const mailOptions = {
-            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
-            to: email,
+        console.log('📧 Enviando email de recuperación con Resend a:', email);
+        
+        const { data, error } = await resend.emails.send({
+            from: 'SalamancaVivela <onboarding@resend.dev>', // Temporal (luego pondrás tu dominio)
+            to: [email],
             subject: 'Recuperación de contraseña - SalamancaVivela',
             html: `
-                <h2>Recuperación de contraseña</h2>
-                <p>Hemos recibido una solicitud para restablecer tu contraseña.</p>
-                <p><a href="${resetLink}">Haz clic aquí para restablecer tu contraseña</a></p>
-                <p>Este enlace expirará en 1 hora.</p>
-                <p>Si no has solicitado este cambio, ignora este email.</p>
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; background-color: #f4f4f4; padding: 20px; }
+                        .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+                        .header { background: linear-gradient(135deg, #c62828 0%, #8e0000 100%); color: white; padding: 30px 25px; text-align: center; }
+                        .header h1 { margin: 0; font-size: 28px; }
+                        .content { padding: 30px 25px; }
+                        .button { display: inline-block; background: #c62828; color: white; text-decoration: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; margin: 20px 0; }
+                        .footer { background: #f8f9fa; padding: 25px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 14px; color: #666; }
+                        .warning { background: #fff3e0; padding: 15px; border-radius: 8px; margin: 20px 0; font-size: 14px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <div class="header">
+                            <h1>Recuperación de contraseña</h1>
+                        </div>
+                        <div class="content">
+                            <p>Hemos recibido una solicitud para restablecer la contraseña de tu cuenta en <strong>SalamancaVivela</strong>.</p>
+                            
+                            <div style="text-align: center;">
+                                <a href="${resetLink}" class="button">RESTABLECER CONTRASEÑA</a>
+                            </div>
+                            
+                            <div class="warning">
+                                <p style="margin: 0;"><strong>⚠️ Este enlace expirará en 1 hora</strong></p>
+                                <p style="margin: 5px 0 0; font-size: 13px;">Si no has solicitado este cambio, puedes ignorar este email.</p>
+                            </div>
+                            
+                            <p style="color: #666; font-size: 14px;">Si el botón no funciona, copia y pega este enlace en tu navegador:</p>
+                            <p style="background: #f5f5f5; padding: 10px; border-radius: 4px; font-size: 12px; word-break: break-all;">${resetLink}</p>
+                        </div>
+                        <div class="footer">
+                            <p>&copy; ${new Date().getFullYear()} SalamancaVivela. Todos los derechos reservados.</p>
+                        </div>
+                    </div>
+                </body>
+                </html>
             `
-        };
+        });
 
-        await transporter.sendMail(mailOptions);
-        console.log('✅ Email de recuperación enviado a:', email);
+        if (error) {
+            console.error('❌ Error de Resend:', error);
+        } else {
+            console.log('✅ Email de recuperación enviado con Resend. ID:', data.id);
+        }
         
     } catch (err) {
-        console.error('❌ Error enviando email de recuperación:', err);
+        console.error('❌ Error enviando email de recuperación con Resend:', err);
     }
 }
 
@@ -828,30 +860,15 @@ app.post('/api/contact',
     }
 );
 
-// Función para enviar email en segundo plano
+// Función para enviar email de contacto en segundo plano con Resend
 async function enviarEmailEnSegundoPlano(name, email, subject, message) {
     try {
-        console.log('📧 Enviando email en segundo plano...');
+        console.log('📧 Enviando email de contacto con Resend...');
         
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 587,
-            secure: false,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            },
-            tls: { rejectUnauthorized: false },
-            connectionTimeout: 10000,  // 10 segundos máximo
-            socketTimeout: 10000
-        });
-
-        const mailOptions = {
-            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
-            to: 'guilleriveraa12@gmail.com',
-            replyTo: email,
+        const { data, error } = await resend.emails.send({
+            from: 'SalamancaVivela <onboarding@resend.dev>',
+            to: ['guilleriveraa12@gmail.com'],
             subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
-            text: `Nombre: ${name}\nEmail: ${email}\nAsunto: ${subject || 'Sin asunto'}\n\nMensaje:\n${message}`,
             html: `
                 <h2>Nuevo mensaje de contacto</h2>
                 <p><strong>Nombre:</strong> ${name}</p>
@@ -862,13 +879,16 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
                 <hr>
                 <p style="color: #666;">Recibido el ${new Date().toLocaleString('es-ES')}</p>
             `
-        };
+        });
 
-        await transporter.sendMail(mailOptions);
-        console.log('✅ Email enviado correctamente');
+        if (error) {
+            console.error('❌ Error de Resend en contacto:', error);
+        } else {
+            console.log('✅ Email de contacto enviado con Resend. ID:', data.id);
+        }
         
     } catch (err) {
-        console.log('⚠️ Error en email (no crítico):', err.message);
+        console.log('⚠️ Error en email de contacto (no crítico):', err.message);
     }
 }
 
