@@ -601,15 +601,20 @@ app.post('/api/contact',
            const transporter = nodemailer.createTransport({
     host: 'smtp.gmail.com',
     port: 587,
-    secure: false, // true para 465, false para 587
+    secure: false,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS
     },
     tls: {
-        rejectUnauthorized: false
-    }
-});
+        rejectUnauthorized: false,
+        ciphers: 'SSLv3'
+    },
+    connectionTimeout: 15000, // 15 segundos de timeout de conexión
+    socketTimeout: 15000,      // 15 segundos de timeout de socket
+    greetingTimeout: 10000,    // 10 segundos de timeout de saludo
+    debug: true                // Activar logs detallados
+});;
 
             await transporter.verify();
             console.log('✅ [CONTACT] Conexión SMTP verificada');
