@@ -297,14 +297,17 @@ console.log('✅ Webhook configurado');
 app.use(express.json());
 console.log('✅ express.json() configurado');
 
-// ===================== REGISTRO CON VALIDACIÓN =====================
+// ===================== REGISTRO CON PREGUNTAS DE SEGURIDAD =====================
 console.log('🛣️ Configurando rutas...');
 
 app.post('/api/register',
     [
         body('nombre').notEmpty().withMessage('El nombre es obligatorio').trim().escape(),
         body('email').isEmail().withMessage('Email inválido').normalizeEmail(),
-        body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
+        body('password').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres'),
+        // 🔥 NUEVAS VALIDACIONES
+        body('preguntaSeguridad').notEmpty().withMessage('Debes seleccionar una pregunta de seguridad'),
+        body('respuestaSeguridad').notEmpty().withMessage('Debes proporcionar una respuesta').trim().escape()
     ],
     async (req, res) => {
         console.log('📝 [REGISTER] Ruta llamada');
@@ -317,7 +320,7 @@ app.post('/api/register',
             });
         }
 
-        const { nombre, email, password } = req.body;
+        const { nombre, email, password, preguntaSeguridad, respuestaSeguridad } = req.body;
 
         try {
             console.log(`🔍 [REGISTER] Validando email: ${email}`);
@@ -350,10 +353,13 @@ app.post('/api/register',
             console.log('🔐 [REGISTER] Hasheando contraseña');
             const hashedPassword = await bcrypt.hash(password, 10);
             
-            console.log('📦 [REGISTER] Insertando usuario');
+            console.log('📦 [REGISTER] Insertando usuario con preguntas de seguridad');
             const { rows: newUser } = await db.query(
-                'INSERT INTO usuarios (nombre, email, password) VALUES ($1, $2, $3) RETURNING id',
-                [nombre, email, hashedPassword]
+                `INSERT INTO usuarios 
+                 (nombre, email, password, pregunta_seguridad, respuesta_seguridad) 
+                 VALUES ($1, $2, $3, $4, LOWER($5)) 
+                 RETURNING id`,
+                [nombre, email, hashedPassword, preguntaSeguridad, respuestaSeguridad.trim().toLowerCase()]
             );
 
             console.log('✅ [REGISTER] Usuario creado ID:', newUser[0].id);
@@ -704,6 +710,109 @@ async function enviarEmailRecuperacion(email, resetLink) {
         console.error('❌ Error enviando email de recuperación con Resend:', err);
     }
 }
+
+// ===================== RECUPERACIÓN SIN EMAIL (PREGUNTAS DE SEGURIDAD) =====================
+console.log('🔐 Configurando rutas de recuperación con preguntas...');
+
+// 1. VERIFICAR EMAIL Y OBTENER PREGUNTA
+app.post('/api/auth/verificar-email-seguridad', async (req, res) => {
+    console.log('🔐 [VERIFICAR EMAIL] Ruta llamada');
+    const { email } = req.body;
+    
+    if (!email) {
+        return res.status(400).json({ message: 'Email requerido' });
+    }
+    
+    try {
+        const { rows } = await db.query(
+            'SELECT id, pregunta_seguridad FROM usuarios WHERE email = $1',
+            [email]
+        );
+        
+        if (rows.length === 0) {
+            return res.json({ exists: false, message: 'Email no encontrado' });
+        }
+        
+        if (!rows[0].pregunta_seguridad) {
+            return res.json({ 
+                exists: false, 
+                message: 'Este usuario no tiene configurada pregunta de seguridad' 
+            });
+        }
+        
+        res.json({ 
+            exists: true, 
+            usuarioId: rows[0].id,
+            pregunta: rows[0].pregunta_seguridad
+        });
+        
+    } catch (err) {
+        console.error('❌ Error:', err);
+        res.status(500).json({ message: 'Error del servidor' });
+    }
+});
+
+// 2. VERIFICAR RESPUESTA
+app.post('/api/auth/verificar-respuesta', async (req, res) => {
+    console.log('🔐 [VERIFICAR RESPUESTA] Ruta llamada');
+    const { usuarioId, respuesta } = req.body;
+    
+    if (!usuarioId || !respuesta) {
+        return res.status(400).json({ message: 'Datos incompletos' });
+    }
+    
+    try {
+        const { rows } = await db.query(
+            'SELECT respuesta_seguridad FROM usuarios WHERE id = $1',
+            [usuarioId]
+        );
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ valid: false, message: 'Usuario no encontrado' });
+        }
+        
+        // Comparar respuestas (case insensitive)
+        if (rows[0].respuesta_seguridad.toLowerCase() === respuesta.toLowerCase().trim()) {
+            res.json({ valid: true });
+        } else {
+            res.json({ valid: false, message: 'Respuesta incorrecta' });
+        }
+        
+    } catch (err) {
+        console.error('❌ Error:', err);
+        res.status(500).json({ message: 'Error del servidor' });
+    }
+});
+
+// 3. CAMBIAR CONTRASEÑA (sin token, después de verificar respuesta)
+app.post('/api/auth/cambiar-password-seguridad', async (req, res) => {
+    console.log('🔐 [CAMBIAR PASSWORD] Ruta llamada');
+    const { usuarioId, newPassword } = req.body;
+    
+    if (!usuarioId || !newPassword) {
+        return res.status(400).json({ message: 'Datos incompletos' });
+    }
+    
+    if (newPassword.length < 6) {
+        return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });
+    }
+    
+    try {
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        
+        await db.query(
+            'UPDATE usuarios SET password = $1 WHERE id = $2',
+            [hashedPassword, usuarioId]
+        );
+        
+        console.log(`✅ Contraseña actualizada para usuario ID: ${usuarioId}`);
+        res.json({ message: 'Contraseña actualizada correctamente' });
+        
+    } catch (err) {
+        console.error('❌ Error:', err);
+        res.status(500).json({ message: 'Error del servidor' });
+    }
+});
 
 // ===================== PERFIL DE USUARIO =====================
 app.get('/api/users/me', async (req, res) => {
