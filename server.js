@@ -239,28 +239,28 @@ if (existingOrder.length > 0) {
 
 // 3. Continuar con el resto (items, carrito, etc.)
 if (pedidoId) {
-  // 2. Obtener items del carrito
-  console.log('🔍 Buscando items del carrito...');
-  const { rows: items } = await db.query(
-    `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id
+  // 2. Obtener items del carrito (MODIFICAR PARA INCLUIR TALLA)
+const { rows: items } = await db.query(
+    `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, ci.talla
      FROM cart_items ci
      JOIN productos p ON ci.producto_id = p.id
      WHERE ci.carrito_id = $1`,
     [carritoId]
-  );
+);
   console.log(`📦 Items encontrados: ${items.length}`);
 
-  // 3. Guardar items
-  if (items.length > 0) {
+  // 3. Guardar items (con talla)
+if (items.length > 0) {
     console.log('💾 Guardando items...');
     for (const item of items) {
-      await db.query(
-        'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio) VALUES ($1, $2, $3, $4)',
-        [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario)]
-      );
+        // 🆕 NUEVO: Incluir talla si existe
+        await db.query(
+            'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
+            [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), item.talla || null]
+        );
     }
     console.log('✅ Items guardados');
-  }
+}
 
   // 4. Actualizar cupón
   if (cuponId) {
@@ -1129,8 +1129,9 @@ app.post('/api/cart/add', async (req, res) => {
     }
 
     const token = authHeader.split(' ')[1];
-    const { productId, quantity = 1 } = req.body;
-    console.log(`➕ [CART ADD] Producto: ${productId}, Cantidad: ${quantity}`);
+    // 🆕 NUEVO: Aceptar talla
+    const { productId, quantity = 1, talla } = req.body;
+    console.log(`➕ [CART ADD] Producto: ${productId}, Cantidad: ${quantity}, Talla: ${talla || 'No'}`);
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
@@ -1167,9 +1168,12 @@ app.post('/api/cart/add', async (req, res) => {
             console.log(`✅ [CART ADD] Carrito existente ID: ${carritoId}`);
         }
 
+        // 🆕 NUEVO: Buscar si ya existe el mismo producto con la misma talla
         const { rows: existing } = await db.query(
-            'SELECT id, cantidad FROM cart_items WHERE carrito_id = $1 AND producto_id = $2',
-            [carritoId, productId]
+            `SELECT id, cantidad FROM cart_items 
+             WHERE carrito_id = $1 AND producto_id = $2 
+             AND (talla = $3 OR (talla IS NULL AND $3 IS NULL))`,
+            [carritoId, productId, talla]
         );
 
         if (existing.length > 0) {
@@ -1180,9 +1184,10 @@ app.post('/api/cart/add', async (req, res) => {
             );
         } else {
             console.log(`📦 [CART ADD] Añadiendo nuevo producto al carrito`);
+            // 🆕 NUEVO: Guardar talla
             await db.query(
-                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario) VALUES ($1, $2, $3, $4)',
-                [carritoId, productId, quantity, product[0].precio]
+                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario, talla) VALUES ($1, $2, $3, $4, $5)',
+                [carritoId, productId, quantity, product[0].precio, talla]
             );
         }
 
@@ -2100,13 +2105,14 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         
         const pedidoId = pedidoRows[0].id;
         
-        // Guardar items del pedido
-        for (const item of items) {
-            await db.query(
-                'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio) VALUES ($1, $2, $3, $4)',
-                [pedidoId, item.id, item.quantity, item.price]
-            );
-        }
+        // Guardar items del pedido (con talla)
+for (const item of items) {
+    // 🆕 NUEVO: Incluir talla si existe
+    await db.query(
+        'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
+        [pedidoId, item.id, item.quantity, item.price, item.talla || null]
+    );
+}
         
         console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
         
