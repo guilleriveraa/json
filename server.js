@@ -2062,7 +2062,6 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
 });
 console.log('✅ Ruta GET /api/orders/:orderId/items configurada');
 
-// ===================== PEDIDOS - RECOGIDA EN TIENDA =====================
 app.post('/api/pedidos/recogida-tienda', async (req, res) => {
     console.log('🏪 [RECOGIDA TIENDA] Ruta llamada');
     
@@ -2081,6 +2080,14 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'Carrito vacío' });
         }
+        
+        // ===== LOGS DE VERIFICACIÓN =====
+        console.log('📦 Items recibidos en backend:', items.length);
+        items.forEach((item, i) => {
+            console.log(`   Item ${i}:`, item);
+            console.log(`      ID: ${item.id}, Talla: ${item.talla}`);
+        });
+        // ================================
         
         // 🎁 Obtener datos de regalo
         const giftActive = gift?.active || false;
@@ -2106,13 +2113,13 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         const pedidoId = pedidoRows[0].id;
         
         // Guardar items del pedido (con talla)
-for (const item of items) {
-    // 🆕 NUEVO: Incluir talla si existe
-    await db.query(
-        'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
-        [pedidoId, item.id, item.quantity, item.price, item.talla || null]
-    );
-}
+        for (const item of items) {
+            console.log('💾 Guardando item con talla:', item.talla); // Log adicional
+            await db.query(
+                'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
+                [pedidoId, item.id, item.quantity, item.price, item.talla || null]
+            );
+        }
         
         console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
         
