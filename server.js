@@ -204,26 +204,37 @@ app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) =>
       // 1. VERIFICAR SI EL PEDIDO YA EXISTE PRIMERO
 console.log('🔍 Verificando si el pedido ya existe...');
 const { rows: existingOrder } = await db.query(
-  'SELECT id FROM pedidos WHERE stripe_session_id = $1',
-  [session.id]
+    'SELECT id FROM pedidos WHERE stripe_session_id = $1',
+    [session.id]
 );
 
 let pedidoId;
 if (existingOrder.length > 0) {
-  pedidoId = existingOrder[0].id;
-  console.log(`⚠️ Pedido ya existente ID: ${pedidoId} (stripe_session_id duplicado)`);
+    pedidoId = existingOrder[0].id;
+    console.log(`⚠️ Pedido ya existente ID: ${pedidoId} (stripe_session_id duplicado)`);
 } else {
-  // 2. Insertar nuevo pedido
-  console.log('📝 Insertando nuevo pedido...');
-  const { rows: pedidoRows } = await db.query(
-    `INSERT INTO pedidos 
-     (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id) 
-     VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7) 
-     RETURNING id`,
-    [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id]
-  );
-  pedidoId = pedidoRows[0].id;
-  console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
+    // 2. Insertar nuevo pedido con datos de regalo
+    console.log('📝 Insertando nuevo pedido...');
+    
+    // 🎁 Obtener los metadatos de regalo de la sesión de Stripe
+    const giftActive = session.metadata.gift_active === 'true';
+    const giftMessage = session.metadata.gift_message || '';
+    const giftCost = parseFloat(session.metadata.gift_cost || '0');
+    
+    console.log('🎁 Datos de regalo recibidos:', { giftActive, giftMessage, giftCost });
+    
+    const { rows: pedidoRows } = await db.query(
+        `INSERT INTO pedidos 
+         (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
+          gift_active, gift_message, gift_cost) 
+         VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10) 
+         RETURNING id`,
+        [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
+         giftActive, giftMessage, giftCost]
+    );
+    
+    pedidoId = pedidoRows[0].id;
+    console.log(`🎉 Pedido nuevo creado ID: ${pedidoId} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
 }
 
 // 3. Continuar con el resto (items, carrito, etc.)
@@ -1800,24 +1811,28 @@ let sessionParams = {
     cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
     shipping_address_collection: { allowed_countries: ['ES'] },
     metadata: {
-        usuarioId: String(usuarioId),
-        carritoId: String(carritoId),
-        subtotal: subtotal.toFixed(2),
-        descuento: descuento.toFixed(2),
-        descuento_tipo: cuponAplicado?.tipo_descuento || '',
-        descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
-        cupon_codigo: cuponAplicado?.codigo || '',
-        subtotal_con_descuento: subtotalConDescuento.toFixed(2),
-        shipping: shipping.toFixed(2),
-        total: totalFinal.toFixed(2),
-        cuponId: cuponId ? String(cuponId) : '',
-        direccion_nombre: direccionData?.nombre || '',
-        direccion_calle: direccionData?.calle || '',
-        direccion_piso: direccionData?.piso || '',
-        direccion_ciudad: direccionData?.ciudad || '',
-        direccion_cp: direccionData?.codigo_postal || '',
-        direccion_pais: direccionData?.pais || ''
-    },
+    usuarioId: String(usuarioId),
+    carritoId: String(carritoId),
+    subtotal: subtotal.toFixed(2),
+    descuento: descuento.toFixed(2),
+    descuento_tipo: cuponAplicado?.tipo_descuento || '',
+    descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
+    cupon_codigo: cuponAplicado?.codigo || '',
+    subtotal_con_descuento: subtotalConDescuento.toFixed(2),
+    shipping: shipping.toFixed(2),
+    total: totalFinal.toFixed(2),
+    cuponId: cuponId ? String(cuponId) : '',
+    direccion_nombre: direccionData?.nombre || '',
+    direccion_calle: direccionData?.calle || '',
+    direccion_piso: direccionData?.piso || '',
+    direccion_ciudad: direccionData?.ciudad || '',
+    direccion_cp: direccionData?.codigo_postal || '',
+    direccion_pais: direccionData?.pais || '',
+    // 🎁 NUEVO: Datos de regalo
+    gift_active: req.body.gift?.active ? 'true' : 'false',
+    gift_message: req.body.gift?.message || '',
+    gift_cost: req.body.gift?.active ? '2.00' : '0'
+},
 };
 
             const session = await stripe.checkout.sessions.create(sessionParams);
@@ -2056,22 +2071,31 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
         
-        const { items, subtotal } = req.body;
+        const { items, subtotal, gift } = req.body;
         
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'Carrito vacío' });
         }
         
-        // Generar código de recogida (opcional)
+        // 🎁 Obtener datos de regalo
+        const giftActive = gift?.active || false;
+        const giftMessage = gift?.message || '';
+        const giftCost = giftActive ? 2.00 : 0;
+        
+        console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
+        
+        // Generar código de recogida
         const codigoRecogida = 'REC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
         
-        // Insertar pedido con estado pendiente y método pago en tienda
+        // Insertar pedido con estado pendiente, método pago en tienda y datos de regalo
         const { rows: pedidoRows } = await db.query(
             `INSERT INTO pedidos 
-             (usuario_id, total, estado, fecha, direccion_envio, metodo_pago, estado_pago, codigo_recogida) 
-             VALUES ($1, $2, 'pendiente', NOW(), 'Recoger en tienda', 'pago_en_tienda', 'pendiente', $3)
+             (usuario_id, total, estado, fecha, direccion_envio, metodo_pago, estado_pago, codigo_recogida,
+              gift_active, gift_message, gift_cost) 
+             VALUES ($1, $2, 'pendiente', NOW(), 'Recoger en tienda', 'pago_en_tienda', 'pendiente', $3,
+              $4, $5, $6)
              RETURNING id`,
-            [usuarioId, subtotal, codigoRecogida]
+            [usuarioId, subtotal, codigoRecogida, giftActive, giftMessage, giftCost]
         );
         
         const pedidoId = pedidoRows[0].id;
@@ -2084,7 +2108,7 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
             );
         }
         
-        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
+        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
         
         res.json({ 
             message: 'Pedido de recogida creado correctamente',
