@@ -2081,13 +2081,13 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
             return res.status(400).json({ message: 'Carrito vacío' });
         }
         
-        // ===== LOGS DE VERIFICACIÓN =====
+        // ===== LOGS CRÍTICOS PARA DEPURACIÓN =====
         console.log('📦 Items recibidos en backend:', items.length);
         items.forEach((item, i) => {
-            console.log(`   Item ${i}:`, item);
-            console.log(`      ID: ${item.id}, Talla: ${item.talla}`);
+            console.log(`   Item ${i}:`, JSON.stringify(item));
+            console.log(`      ID: ${item.id}, Talla: ${item.talla}, Tipo talla: ${typeof item.talla}`);
         });
-        // ================================
+        // ==========================================
         
         // 🎁 Obtener datos de regalo
         const giftActive = gift?.active || false;
@@ -2099,7 +2099,7 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         // Generar código de recogida
         const codigoRecogida = 'REC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
         
-        // Insertar pedido con estado pendiente, método pago en tienda y datos de regalo
+        // Insertar pedido
         const { rows: pedidoRows } = await db.query(
             `INSERT INTO pedidos 
              (usuario_id, total, estado, fecha, direccion_envio, metodo_pago, estado_pago, codigo_recogida,
@@ -2113,15 +2113,22 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         const pedidoId = pedidoRows[0].id;
         
         // Guardar items del pedido (con talla)
+        console.log('💾 Guardando items para pedido:', pedidoId);
         for (const item of items) {
-            console.log('💾 Guardando item con talla:', item.talla); // Log adicional
+            console.log('   → Guardando item:', { 
+                id: item.id, 
+                talla: item.talla,
+                quantity: item.quantity,
+                price: item.price 
+            });
+            
             await db.query(
                 'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
                 [pedidoId, item.id, item.quantity, item.price, item.talla || null]
             );
         }
         
-        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
+        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
         
         res.json({ 
             message: 'Pedido de recogida creado correctamente',
