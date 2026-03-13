@@ -1078,8 +1078,9 @@ app.get('/api/cart', async (req, res) => {
         const carritoId = carrito[0].id;
         console.log(`🛒 [GET CART] Carrito ID: ${carritoId}`);
 
+        // 🔥🔥🔥 CAMBIO CRÍTICO: Añadir ci.talla al SELECT
         const { rows: items } = await db.query(
-            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen
+            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
              FROM cart_items ci
              JOIN productos p ON ci.producto_id = p.id
              WHERE ci.carrito_id = $1`,
@@ -1097,7 +1098,8 @@ app.get('/api/cart', async (req, res) => {
                 name: item.nombre,
                 price: precio,
                 quantity: item.cantidad,
-                image: item.imagen || ''
+                image: item.imagen || '',
+                talla: item.talla  // ← AHORA SÍ INCLUIMOS LA TALLA
             };
         });
 
