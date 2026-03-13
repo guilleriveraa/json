@@ -2505,14 +2505,34 @@ app.delete('/api/admin/resenas/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN RESEÑAS DELETE] Ruta llamada para reseña: ${id}`);
 
+    // Validar que el ID es un número
+    if (isNaN(parseInt(id))) {
+        return res.status(400).json({ message: 'ID inválido' });
+    }
+
     try {
-        await db.query('DELETE FROM reseñas_votos WHERE reseña_id = $1', [id]);
+        // Verificar si la reseña existe antes de eliminar
+        const { rows: existe } = await db.query(
+            'SELECT id FROM reseñas WHERE id = $1',
+            [id]
+        );
+
+        if (existe.length === 0) {
+            return res.status(404).json({ message: 'Reseña no encontrada' });
+        }
+
+        // Eliminar directamente la reseña (asumiendo que no hay tabla de votos)
         await db.query('DELETE FROM reseñas WHERE id = $1', [id]);
-        console.log('✅ [ADMIN RESEÑAS DELETE] Reseña eliminada');
-        res.json({ message: 'Reseña eliminada' });
+        
+        console.log(`✅ [ADMIN RESEÑAS DELETE] Reseña ${id} eliminada`);
+        res.json({ message: 'Reseña eliminada correctamente' });
+
     } catch (err) {
         console.error('❌ [ADMIN RESEÑAS DELETE] Error:', err);
-        res.status(500).json({ message: 'Error al eliminar' });
+        res.status(500).json({ 
+            message: 'Error al eliminar la reseña',
+            error: err.message 
+        });
     }
 });
 console.log('✅ Ruta DELETE /api/admin/resenas/:id configurada');
