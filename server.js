@@ -1309,7 +1309,7 @@ app.get('/api/productos', async (req, res) => {
         let params = [];
         
         if (categoria) {
-            query += ` WHERE c.nombre = $1`;
+            query += ` WHERE LOWER(c.nombre) = LOWER($1)`;
             params.push(categoria);
         }
         
