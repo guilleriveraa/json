@@ -112,6 +112,7 @@ console.log('✅ CORS configurado con comodín para Vercel');
 // Aplicar CORS una sola vez (esto ya maneja OPTIONS automáticamente)
 app.use(cors(corsOptions));
 console.log('✅ CORS configurado con comodín para Vercel');
+app.use(express.json());
 
 // 4. Rate Limiting
 const limiter = rateLimit({
@@ -280,7 +281,7 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
 
   res.json({received: true});
 });
-console.log('✅ Webhook configurado');;
+console.log('✅ Webhook configurado');
 
 // ===================== REGISTRO CON PREGUNTAS DE SEGURIDAD =====================
 console.log('🛣️ Configurando rutas...');
