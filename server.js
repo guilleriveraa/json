@@ -108,11 +108,6 @@ app.options('*', cors(corsOptions));
 
 console.log('✅ CORS configurado con comodín para Vercel');
 
-
-// Aplicar CORS una sola vez (esto ya maneja OPTIONS automáticamente)
-app.use(cors(corsOptions));
-console.log('✅ CORS configurado con comodín para Vercel');
-
 // 4. Rate Limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
