@@ -39,7 +39,7 @@ const app = express();
 console.log('✅ App creada');
 app.set('trust proxy', 1);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 const JWT_SECRET = process.env.JWT_SECRET;
 console.log('✅ Variables de entorno leídas');
 
@@ -2610,6 +2610,6 @@ app.post('/api/emergency-clear-cart', async (req, res) => {
 
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
-app.listen(PORT, () =>
-    console.log(`✅ Servidor corriendo en http://localhost:${PORT}`)
+app.listen(PORT, '0.0.0.0', () =>
+    console.log(`✅ Servidor corriendo en puerto ${PORT}`)
 );
