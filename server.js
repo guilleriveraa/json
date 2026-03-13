@@ -218,8 +218,8 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
         const { rows: pedidoRows } = await db.query(
           `INSERT INTO pedidos 
            (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
-            gift_active, gift_message, gift_cost) 
-           VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10) 
+            gift_active, gift_message, gift_cost, metodo_pago, estado_pago) 
+           VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'stripe', 'pagado') 
            RETURNING id`,
           [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
            giftActive, giftMessage, giftCost]
@@ -229,53 +229,70 @@ app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) =
         console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
       }
 
-      // 3. OBTENER ITEMS DEL CARRITO (¡ESTO FALTABA!)
-      console.log('🔍 Obteniendo items del carrito...');
-      const { rows: items } = await db.query(
-        `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
-         FROM cart_items ci
-         JOIN productos p ON ci.producto_id = p.id
-         WHERE ci.carrito_id = $1`,
-        [carritoId]
-      );
-      console.log(`📦 Items encontrados: ${items.length}`);
-
-      // 4. Guardar items con información completa
-      if (items.length > 0) {
-        console.log('💾 Guardando items...');
-        for (const item of items) {
-          console.log(`   → Guardando item: ${item.nombre}, Talla: ${item.talla}`);
-          
-          await db.query(
-            `INSERT INTO order_items 
-             (pedido_id, producto_id, cantidad, precio, talla, nombre_producto, imagen_producto) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), 
-             item.talla || null, item.nombre, item.imagen]
-          );
-        }
-        console.log('✅ Items guardados con información completa');
-      }
-
-      // 5. Actualizar cupón
-      if (cuponId) {
-        console.log('🎫 Actualizando cupón...');
-        await db.query(
-          'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
-          [cuponId]
+      // 🔥🔥🔥 CAMBIO 2: Verificar que carritoId existe
+      if (!carritoId) {
+        console.error('❌ ERROR CRÍTICO: carritoId es null o undefined');
+      } else {
+        // 🔥🔥🔥 CAMBIO 3: Verificar que el carrito existe en la BD
+        const { rows: carritoExists } = await db.query(
+          'SELECT id FROM carritos WHERE id = $1',
+          [carritoId]
         );
-        console.log('✅ Cupón actualizado');
-      }
+        
+        if (carritoExists.length === 0) {
+          console.error(`❌ ERROR: El carrito con ID ${carritoId} no existe en la BD`);
+        } else {
+          console.log(`✅ Carrito ${carritoId} verificado, obteniendo items...`);
+          
+          // 3. OBTENER ITEMS DEL CARRITO
+          const { rows: items } = await db.query(
+            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
+             FROM cart_items ci
+             JOIN productos p ON ci.producto_id = p.id
+             WHERE ci.carrito_id = $1`,
+            [carritoId]
+          );
+          console.log(`📦 Items encontrados en carrito: ${items.length}`);
 
-      // 6. Vaciar carrito
-      console.log('🧹 Vaciando carrito...');
-      if (carritoId) {
-        const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-        console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+          // 4. Guardar items con información completa
+          if (items.length > 0) {
+            console.log('💾 Guardando items en order_items...');
+            for (const item of items) {
+              console.log(`   → Insertando: ${item.nombre}, cantidad: ${item.cantidad}, talla: ${item.talla || 'N/A'}`);
+              
+              await db.query(
+                `INSERT INTO order_items 
+                 (pedido_id, producto_id, cantidad, precio, talla, nombre_producto, imagen_producto) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), 
+                 item.talla || null, item.nombre, item.imagen]
+              );
+            }
+            console.log(`✅ ${items.length} items guardados correctamente`);
+          } else {
+            console.log('⚠️ No hay items para guardar');
+          }
+
+          // 5. Actualizar cupón
+          if (cuponId) {
+            console.log('🎫 Actualizando cupón...');
+            await db.query(
+              'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
+              [cuponId]
+            );
+            console.log('✅ Cupón actualizado');
+          }
+
+          // 6. Vaciar carrito
+          console.log('🧹 Vaciando carrito...');
+          const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+          console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+        }
       }
 
     } catch (err) {
       console.error('❌ Error en webhook:', err);
+      console.error('Stack:', err.stack);
     }
   }
 
