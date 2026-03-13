@@ -143,23 +143,16 @@ console.log('🔑 STRIPE_WEBHOOK_SECRET cargado:', process.env.STRIPE_WEBHOOK_SE
 console.log('🔑 Longitud del secreto:', process.env.STRIPE_WEBHOOK_SECRET?.length);
 console.log('🔑 Primeros 10 chars:', process.env.STRIPE_WEBHOOK_SECRET?.substring(0, 10) + '...');
 // --- NUEVO: Asegurar que el body se mantiene como raw ---
-app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) => {
-  // --- NUEVO: Extraer la firma y el cuerpo raw antes de cualquier otra operación ---
+// ===== WEBHOOK DE STRIPE =====
+app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
   const sig = req.headers['stripe-signature'];
-  // --- NUEVO: req.body es un Buffer. Lo pasamos directamente a constructEvent ---
   const rawBody = req.body;
 
   console.log('🔔 Webhook recibido');
-  console.log('📦 Tipo de req.body:', typeof rawBody);
-  console.log('📦 req.body es Buffer?', Buffer.isBuffer(rawBody));
-  console.log('📦 Longitud del body:', rawBody.length);
-  console.log('📦 Primeros 100 chars:', rawBody.toString('utf8').substring(0, 100).replace(/\n/g, ' '));
-  console.log('📦 Stripe-Signature:', sig?.substring(0, 50));
 
   let event;
 
   try {
-    // --- NUEVO: Pasar el Buffer directamente ---
     event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
     console.log('✅ Webhook verificado. Tipo:', event.type);
   } catch (err) {
@@ -168,7 +161,6 @@ app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) =>
   }
 
   if (event.type === 'checkout.session.completed') {
-    // --- El resto de tu lógica permanece IGUAL ---
     console.log('💰 Checkout completado');
     const session = event.data.object;
     
@@ -201,101 +193,86 @@ app.post('/webhook', express.raw({type: 'application/json'}),async (req, res) =>
 
       console.log('📍 Dirección:', direccionEnvio || 'No especificada');
 
-      // 1. VERIFICAR SI EL PEDIDO YA EXISTE PRIMERO
-console.log('🔍 Verificando si el pedido ya existe...');
-const { rows: existingOrder } = await db.query(
-    'SELECT id FROM pedidos WHERE stripe_session_id = $1',
-    [session.id]
-);
+      // 1. VERIFICAR SI EL PEDIDO YA EXISTE
+      console.log('🔍 Verificando si el pedido ya existe...');
+      const { rows: existingOrder } = await db.query(
+        'SELECT id FROM pedidos WHERE stripe_session_id = $1',
+        [session.id]
+      );
 
-let pedidoId;
-if (existingOrder.length > 0) {
-    pedidoId = existingOrder[0].id;
-    console.log(`⚠️ Pedido ya existente ID: ${pedidoId} (stripe_session_id duplicado)`);
-} else {
-    // 2. Insertar nuevo pedido con datos de regalo
-    console.log('📝 Insertando nuevo pedido...');
-    
-    // 🎁 Obtener los metadatos de regalo de la sesión de Stripe
-    const giftActive = session.metadata.gift_active === 'true';
-    const giftMessage = session.metadata.gift_message || '';
-    const giftCost = parseFloat(session.metadata.gift_cost || '0');
-    
-    console.log('🎁 Datos de regalo recibidos:', { giftActive, giftMessage, giftCost });
-    
-    const { rows: pedidoRows } = await db.query(
-        `INSERT INTO pedidos 
-         (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
-          gift_active, gift_message, gift_cost) 
-         VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10) 
-         RETURNING id`,
-        [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
-         giftActive, giftMessage, giftCost]
-    );
-    
-    pedidoId = pedidoRows[0].id;
-    console.log(`🎉 Pedido nuevo creado ID: ${pedidoId} - Regalo: ${giftActive ? 'Sí' : 'No'}`);
-}
-
-// 3. Continuar con el resto (items, carrito, etc.)
-if (pedidoId) {
-  // 2. Obtener items del carrito (MODIFICAR PARA INCLUIR TALLA)
-const { rows: items } = await db.query(
-    `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, ci.talla
-     FROM cart_items ci
-     JOIN productos p ON ci.producto_id = p.id
-     WHERE ci.carrito_id = $1`,
-    [carritoId]
-);
-  console.log(`📦 Items encontrados: ${items.length}`);
-
-  // 3. Guardar items (con talla)
-if (items.length > 0) {
-    console.log('💾 Guardando items...');
-    for (const item of items) {
-        // 🆕 NUEVO: Incluir talla si existe
-        await db.query(
-            'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
-            [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), item.talla || null]
-        );
-    }
-    console.log('✅ Items guardados');
-}
-
-  // 4. Actualizar cupón
-  if (cuponId) {
-    console.log('🎫 Actualizando cupón...');
-    await db.query(
-      'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
-      [cuponId]
-    );
-    console.log('✅ Cupón actualizado');
-  }
-}
-
-      // 5. VACIAR CARRITO - CON LOGS EXHAUSTIVOS
-      console.log('🧹 [DEBUG] Entrando en la sección de vaciado de carrito...');
-      console.log(`🧹 [DEBUG] Intentando vaciar carrito con ID: ${carritoId} (tipo: ${typeof carritoId})`);
-
-      if (!carritoId) {
-        console.log('❌ [DEBUG] ERROR: carritoId es undefined o null. No se puede vaciar.');
+      let pedidoId;
+      if (existingOrder.length > 0) {
+        pedidoId = existingOrder[0].id;
+        console.log(`⚠️ Pedido ya existente ID: ${pedidoId}`);
       } else {
-        try {
-          console.log(`🧹 [DEBUG] Ejecutando: DELETE FROM cart_items WHERE carrito_id = ${carritoId}`);
-          const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-          console.log(`🧹 [DEBUG] Resultado de la consulta:`, deleteResult);
-          console.log(`🧹 [DEBUG] Filas eliminadas: ${deleteResult.rowCount}`);
-          
-          if (deleteResult.rowCount > 0) {
-            console.log('✅ ¡CARRITO VACIADO CON ÉXITO!');
-          } else {
-            console.log('⚠️ No se eliminó ninguna fila. ¿El carrito ya estaba vacío o no existía?');
-          }
-        } catch (err) {
-          console.error('❌ [DEBUG] Error GORDO al intentar vaciar el carrito:', err);
-        }
+        // 2. Insertar nuevo pedido
+        console.log('📝 Insertando nuevo pedido...');
+        
+        const giftActive = session.metadata.gift_active === 'true';
+        const giftMessage = session.metadata.gift_message || '';
+        const giftCost = parseFloat(session.metadata.gift_cost || '0');
+        
+        console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
+        
+        const { rows: pedidoRows } = await db.query(
+          `INSERT INTO pedidos 
+           (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
+            gift_active, gift_message, gift_cost) 
+           VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10) 
+           RETURNING id`,
+          [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
+           giftActive, giftMessage, giftCost]
+        );
+        
+        pedidoId = pedidoRows[0].id;
+        console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
       }
-      console.log('🧹 [DEBUG] Fin de la sección de vaciado de carrito.\n');
+
+      // 3. OBTENER ITEMS DEL CARRITO (¡ESTO FALTABA!)
+      console.log('🔍 Obteniendo items del carrito...');
+      const { rows: items } = await db.query(
+        `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
+         FROM cart_items ci
+         JOIN productos p ON ci.producto_id = p.id
+         WHERE ci.carrito_id = $1`,
+        [carritoId]
+      );
+      console.log(`📦 Items encontrados: ${items.length}`);
+
+      // 4. Guardar items con información completa
+      if (items.length > 0) {
+        console.log('💾 Guardando items...');
+        for (const item of items) {
+          console.log(`   → Guardando item: ${item.nombre}, Talla: ${item.talla}`);
+          
+          await db.query(
+            `INSERT INTO order_items 
+             (pedido_id, producto_id, cantidad, precio, talla, nombre_producto, imagen_producto) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), 
+             item.talla || null, item.nombre, item.imagen]
+          );
+        }
+        console.log('✅ Items guardados con información completa');
+      }
+
+      // 5. Actualizar cupón
+      if (cuponId) {
+        console.log('🎫 Actualizando cupón...');
+        await db.query(
+          'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
+          [cuponId]
+        );
+        console.log('✅ Cupón actualizado');
+      }
+
+      // 6. Vaciar carrito
+      console.log('🧹 Vaciando carrito...');
+      if (carritoId) {
+        const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+        console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+      }
+
     } catch (err) {
       console.error('❌ Error en webhook:', err);
     }
@@ -303,10 +280,7 @@ if (items.length > 0) {
 
   res.json({received: true});
 });
-console.log('✅ Webhook configurado');
-
-app.use(express.json());
-console.log('✅ express.json() configurado');
+console.log('✅ Webhook configurado');;
 
 // ===================== REGISTRO CON PREGUNTAS DE SEGURIDAD =====================
 console.log('🛣️ Configurando rutas...');
