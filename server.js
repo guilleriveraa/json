@@ -125,10 +125,10 @@ const authLimiter = rateLimit({
 });
 console.log('✅ Rate Limiters creados');
 
-//app.use('/api/', limiter);
-//app.use('/api/login', authLimiter);
-//app.use('/api/register', authLimiter);
-//console.log('✅ Rate Limiting aplicado');
+app.use('/api/', limiter);
+app.use('/api/login', authLimiter);
+app.use('/api/register', authLimiter);
+console.log('✅ Rate Limiting aplicado');
 console.log('⚠️ Rate limiting desactivado para pruebas');
 
 // ===== WEBHOOK DE STRIPE (VERSIÓN CORREGIDA) =====
@@ -986,7 +986,7 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
         
         const { data, error } = await resend.emails.send({
             from: 'SalamancaVivela <onboarding@resend.dev>',
-            to: ['guilleriveraa12@gmail.com'],
+            to: ['administracion@salamancavivela.com'],
             subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
             html: `
                 <h2>Nuevo mensaje de contacto</h2>
