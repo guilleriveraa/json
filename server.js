@@ -650,8 +650,8 @@ async function enviarEmailRecuperacion(email, resetLink) {
         console.log('📧 Enviando email de recuperación con Resend a:', email);
         
         const { data, error } = await resend.emails.send({
-            from: 'SalamancaVivela <onboarding@resend.dev>', // Temporal (luego pondrás tu dominio)
-            to: ['delivered@resend.dev'], // Temporal (luego pondrás el email del usuario)
+            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>', // Temporal (luego pondrás tu dominio)
+            to: ['salamancavivela@gmail.com'], // Temporal (luego pondrás el email del usuario)
             subject: 'Recuperación de contraseña - SalamancaVivela',
             html: `
                 <!DOCTYPE html>
@@ -985,8 +985,8 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
         console.log('📧 Enviando email de contacto con Resend...');
         
         const { data, error } = await resend.emails.send({
-            from: 'SalamancaVivela <onboarding@resend.dev>',
-            to: ['administracion@salamancavivela.com'],
+            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
+            to: ['salamancavivela@gmail.com'],
             subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
             html: `
                 <h2>Nuevo mensaje de contacto</h2>
