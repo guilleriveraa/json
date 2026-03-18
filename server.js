@@ -139,158 +139,158 @@ console.log('🔑 Longitud del secreto:', process.env.STRIPE_WEBHOOK_SECRET?.len
 console.log('🔑 Primeros 10 chars:', process.env.STRIPE_WEBHOOK_SECRET?.substring(0, 10) + '...');
 // --- NUEVO: Asegurar que el body se mantiene como raw ---
 // ===== WEBHOOK DE STRIPE =====
-app.post('/webhook', express.raw({type: 'application/json'}), async (req, res) => {
-  const sig = req.headers['stripe-signature'];
-  const rawBody = req.body;
+app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+    const sig = req.headers['stripe-signature'];
+    const rawBody = req.body;
 
-  console.log('🔔 Webhook recibido');
+    console.log('🔔 Webhook recibido');
 
-  let event;
-
-  try {
-    event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
-    console.log('✅ Webhook verificado. Tipo:', event.type);
-  } catch (err) {
-    console.log(`❌ Error de firma del webhook: ${err.message}`);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
-  }
-
-  if (event.type === 'checkout.session.completed') {
-    console.log('💰 Checkout completado');
-    const session = event.data.object;
-    
-    const usuarioId = session.metadata.usuarioId;
-    const carritoId = session.metadata.carritoId;
-    const total = parseFloat(session.metadata.total);
-    const descuento = parseFloat(session.metadata.descuento);
-    const cuponId = session.metadata.cuponId || null;
-    
-    console.log(`✅ Pago completado para usuario ${usuarioId}`);
-    console.log(`🛒 Carrito ID: ${carritoId}`);
+    let event;
 
     try {
-      const direccionEnvio = [
-        session.metadata.direccion_calle,
-        session.metadata.direccion_piso,
-        session.metadata.direccion_ciudad,
-        session.metadata.direccion_cp,
-        session.metadata.direccion_pais
-      ].filter(Boolean).join(', ');
+        event = stripe.webhooks.constructEvent(rawBody, sig, process.env.STRIPE_WEBHOOK_SECRET);
+        console.log('✅ Webhook verificado. Tipo:', event.type);
+    } catch (err) {
+        console.log(`❌ Error de firma del webhook: ${err.message}`);
+        return res.status(400).send(`Webhook Error: ${err.message}`);
+    }
 
-      const direccionDetalles = JSON.stringify({
-        nombre: session.metadata.direccion_nombre || '',
-        calle: session.metadata.direccion_calle || '',
-        piso: session.metadata.direccion_piso || '',
-        ciudad: session.metadata.direccion_ciudad || '',
-        codigo_postal: session.metadata.direccion_cp || '',
-        pais: session.metadata.direccion_pais || ''
-      });
+    if (event.type === 'checkout.session.completed') {
+        console.log('💰 Checkout completado');
+        const session = event.data.object;
 
-      console.log('📍 Dirección:', direccionEnvio || 'No especificada');
+        const usuarioId = session.metadata.usuarioId;
+        const carritoId = session.metadata.carritoId;
+        const total = parseFloat(session.metadata.total);
+        const descuento = parseFloat(session.metadata.descuento);
+        const cuponId = session.metadata.cuponId || null;
 
-      // 1. VERIFICAR SI EL PEDIDO YA EXISTE
-      console.log('🔍 Verificando si el pedido ya existe...');
-      const { rows: existingOrder } = await db.query(
-        'SELECT id FROM pedidos WHERE stripe_session_id = $1',
-        [session.id]
-      );
+        console.log(`✅ Pago completado para usuario ${usuarioId}`);
+        console.log(`🛒 Carrito ID: ${carritoId}`);
 
-      let pedidoId;
-      if (existingOrder.length > 0) {
-        pedidoId = existingOrder[0].id;
-        console.log(`⚠️ Pedido ya existente ID: ${pedidoId}`);
-      } else {
-        // 2. Insertar nuevo pedido
-        console.log('📝 Insertando nuevo pedido...');
-        
-        const giftActive = session.metadata.gift_active === 'true';
-        const giftMessage = session.metadata.gift_message || '';
-        const giftCost = parseFloat(session.metadata.gift_cost || '0');
-        
-        console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
-        
-        const { rows: pedidoRows } = await db.query(
-          `INSERT INTO pedidos 
+        try {
+            const direccionEnvio = [
+                session.metadata.direccion_calle,
+                session.metadata.direccion_piso,
+                session.metadata.direccion_ciudad,
+                session.metadata.direccion_cp,
+                session.metadata.direccion_pais
+            ].filter(Boolean).join(', ');
+
+            const direccionDetalles = JSON.stringify({
+                nombre: session.metadata.direccion_nombre || '',
+                calle: session.metadata.direccion_calle || '',
+                piso: session.metadata.direccion_piso || '',
+                ciudad: session.metadata.direccion_ciudad || '',
+                codigo_postal: session.metadata.direccion_cp || '',
+                pais: session.metadata.direccion_pais || ''
+            });
+
+            console.log('📍 Dirección:', direccionEnvio || 'No especificada');
+
+            // 1. VERIFICAR SI EL PEDIDO YA EXISTE
+            console.log('🔍 Verificando si el pedido ya existe...');
+            const { rows: existingOrder } = await db.query(
+                'SELECT id FROM pedidos WHERE stripe_session_id = $1',
+                [session.id]
+            );
+
+            let pedidoId;
+            if (existingOrder.length > 0) {
+                pedidoId = existingOrder[0].id;
+                console.log(`⚠️ Pedido ya existente ID: ${pedidoId}`);
+            } else {
+                // 2. Insertar nuevo pedido
+                console.log('📝 Insertando nuevo pedido...');
+
+                const giftActive = session.metadata.gift_active === 'true';
+                const giftMessage = session.metadata.gift_message || '';
+                const giftCost = parseFloat(session.metadata.gift_cost || '0');
+
+                console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
+
+                const { rows: pedidoRows } = await db.query(
+                    `INSERT INTO pedidos 
            (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
             gift_active, gift_message, gift_cost, metodo_pago, estado_pago) 
            VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'stripe', 'pagado') 
            RETURNING id`,
-          [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
-           giftActive, giftMessage, giftCost]
-        );
-        
-        pedidoId = pedidoRows[0].id;
-        console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
-      }
+                    [usuarioId, total, direccionEnvio, direccionDetalles, cuponId, descuento, session.id,
+                        giftActive, giftMessage, giftCost]
+                );
 
-      // 🔥🔥🔥 CAMBIO 2: Verificar que carritoId existe
-      if (!carritoId) {
-        console.error('❌ ERROR CRÍTICO: carritoId es null o undefined');
-      } else {
-        // 🔥🔥🔥 CAMBIO 3: Verificar que el carrito existe en la BD
-        const { rows: carritoExists } = await db.query(
-          'SELECT id FROM carritos WHERE id = $1',
-          [carritoId]
-        );
-        
-        if (carritoExists.length === 0) {
-          console.error(`❌ ERROR: El carrito con ID ${carritoId} no existe en la BD`);
-        } else {
-          console.log(`✅ Carrito ${carritoId} verificado, obteniendo items...`);
-          
-          // 3. OBTENER ITEMS DEL CARRITO
-          const { rows: items } = await db.query(
-            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
+                pedidoId = pedidoRows[0].id;
+                console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
+            }
+
+            // 🔥🔥🔥 CAMBIO 2: Verificar que carritoId existe
+            if (!carritoId) {
+                console.error('❌ ERROR CRÍTICO: carritoId es null o undefined');
+            } else {
+                // 🔥🔥🔥 CAMBIO 3: Verificar que el carrito existe en la BD
+                const { rows: carritoExists } = await db.query(
+                    'SELECT id FROM carritos WHERE id = $1',
+                    [carritoId]
+                );
+
+                if (carritoExists.length === 0) {
+                    console.error(`❌ ERROR: El carrito con ID ${carritoId} no existe en la BD`);
+                } else {
+                    console.log(`✅ Carrito ${carritoId} verificado, obteniendo items...`);
+
+                    // 3. OBTENER ITEMS DEL CARRITO
+                    const { rows: items } = await db.query(
+                        `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
              FROM cart_items ci
              JOIN productos p ON ci.producto_id = p.id
              WHERE ci.carrito_id = $1`,
-            [carritoId]
-          );
-          console.log(`📦 Items encontrados en carrito: ${items.length}`);
+                        [carritoId]
+                    );
+                    console.log(`📦 Items encontrados en carrito: ${items.length}`);
 
-          // 4. Guardar items con información completa
-          if (items.length > 0) {
-            console.log('💾 Guardando items en order_items...');
-            for (const item of items) {
-              console.log(`   → Insertando: ${item.nombre}, cantidad: ${item.cantidad}, talla: ${item.talla || 'N/A'}`);
-              
-              await db.query(
-                `INSERT INTO order_items 
+                    // 4. Guardar items con información completa
+                    if (items.length > 0) {
+                        console.log('💾 Guardando items en order_items...');
+                        for (const item of items) {
+                            console.log(`   → Insertando: ${item.nombre}, cantidad: ${item.cantidad}, talla: ${item.talla || 'N/A'}`);
+
+                            await db.query(
+                                `INSERT INTO order_items 
                  (pedido_id, producto_id, cantidad, precio, talla, nombre_producto, imagen_producto) 
                  VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-                [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario), 
-                 item.talla || null, item.nombre, item.imagen]
-              );
+                                [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario),
+                                    item.talla || null, item.nombre, item.imagen]
+                            );
+                        }
+                        console.log(`✅ ${items.length} items guardados correctamente`);
+                    } else {
+                        console.log('⚠️ No hay items para guardar');
+                    }
+
+                    // 5. Actualizar cupón
+                    if (cuponId) {
+                        console.log('🎫 Actualizando cupón...');
+                        await db.query(
+                            'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
+                            [cuponId]
+                        );
+                        console.log('✅ Cupón actualizado');
+                    }
+
+                    // 6. Vaciar carrito
+                    console.log('🧹 Vaciando carrito...');
+                    const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+                    console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+                }
             }
-            console.log(`✅ ${items.length} items guardados correctamente`);
-          } else {
-            console.log('⚠️ No hay items para guardar');
-          }
 
-          // 5. Actualizar cupón
-          if (cuponId) {
-            console.log('🎫 Actualizando cupón...');
-            await db.query(
-              'UPDATE cupones SET usos_actuales = usos_actuales + 1 WHERE id = $1',
-              [cuponId]
-            );
-            console.log('✅ Cupón actualizado');
-          }
-
-          // 6. Vaciar carrito
-          console.log('🧹 Vaciando carrito...');
-          const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-          console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+        } catch (err) {
+            console.error('❌ Error en webhook:', err);
+            console.error('Stack:', err.stack);
         }
-      }
-
-    } catch (err) {
-      console.error('❌ Error en webhook:', err);
-      console.error('Stack:', err.stack);
     }
-  }
 
-  res.json({received: true});
+    res.json({ received: true });
 });
 console.log('✅ Webhook configurado');
 app.use(express.json());
@@ -313,9 +313,9 @@ app.post('/api/register',
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             console.log('❌ [REGISTER] Errores de validación:', errors.array());
-            return res.status(400).json({ 
-                message: 'Error de validación', 
-                errors: errors.array() 
+            return res.status(400).json({
+                message: 'Error de validación',
+                errors: errors.array()
             });
         }
 
@@ -324,7 +324,7 @@ app.post('/api/register',
         try {
             console.log(`🔍 [REGISTER] Validando email: ${email}`);
             const validation = await validateEmail(email);
-            
+
             if (!validation.isValid) {
                 console.log('❌ [REGISTER] Email no válido:', validation.message);
                 let message = 'El email no es válido';
@@ -351,7 +351,7 @@ app.post('/api/register',
 
             console.log('🔐 [REGISTER] Hasheando contraseña');
             const hashedPassword = await bcrypt.hash(password, 10);
-            
+
             console.log('📦 [REGISTER] Insertando usuario con preguntas de seguridad');
             const { rows: newUser } = await db.query(
                 `INSERT INTO usuarios 
@@ -383,7 +383,7 @@ console.log('✅ Ruta /api/register configurada');
 app.get('/api/user/is-admin', async (req, res) => {
     console.log('👑 [IS-ADMIN] Ruta llamada');
     const authHeader = req.headers.authorization;
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log('❌ [IS-ADMIN] No autorizado - sin token');
         return res.json({ isAdmin: false });
@@ -394,7 +394,7 @@ app.get('/api/user/is-admin', async (req, res) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         console.log('✅ [IS-ADMIN] Token válido para usuario:', decoded.userId);
-        
+
         const { rows } = await db.query(
             'SELECT is_admin FROM usuarios WHERE id = $1',
             [decoded.userId]
@@ -480,7 +480,7 @@ app.post('/api/auth/forgot-password', [
     body('email').isEmail().withMessage('Email inválido').normalizeEmail()
 ], async (req, res) => {
     console.log('🔑 [FORGOT PASSWORD] Ruta llamada');
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -498,8 +498,8 @@ app.post('/api/auth/forgot-password', [
         // Por seguridad, siempre devolvemos el mismo mensaje
         if (usuarios.length === 0) {
             console.log('⚠️ Email no encontrado, pero devolvemos OK por seguridad');
-            return res.json({ 
-                message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.' 
+            return res.json({
+                message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.'
             });
         }
 
@@ -513,7 +513,7 @@ app.post('/api/auth/forgot-password', [
 
         // Generar token seguro
         const token = crypto.randomBytes(32).toString('hex');
-        
+
         // Token válido por 1 hora
         const expiresAt = new Date();
         expiresAt.setHours(expiresAt.getHours() + 1);
@@ -531,8 +531,8 @@ app.post('/api/auth/forgot-password', [
         await enviarEmailRecuperacion(email, resetLink);
 
         console.log('✅ Email de recuperación enviado a:', email);
-        res.json({ 
-            message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.' 
+        res.json({
+            message: 'Si el email existe, recibirás instrucciones para recuperar tu contraseña.'
         });
 
     } catch (err) {
@@ -544,7 +544,7 @@ app.post('/api/auth/forgot-password', [
 // 2. VERIFICAR TOKEN
 app.get('/api/auth/verify-reset-token', async (req, res) => {
     console.log('🔑 [VERIFY TOKEN] Ruta llamada');
-    
+
     const { token } = req.query;
 
     if (!token) {
@@ -563,15 +563,15 @@ app.get('/api/auth/verify-reset-token', async (req, res) => {
         );
 
         if (tokens.length === 0) {
-            return res.status(400).json({ 
-                valid: false, 
-                message: 'Token inválido o expirado' 
+            return res.status(400).json({
+                valid: false,
+                message: 'Token inválido o expirado'
             });
         }
 
-        res.json({ 
-            valid: true, 
-            email: tokens[0].email 
+        res.json({
+            valid: true,
+            email: tokens[0].email
         });
 
     } catch (err) {
@@ -586,7 +586,7 @@ app.post('/api/auth/reset-password', [
     body('newPassword').isLength({ min: 6 }).withMessage('La contraseña debe tener al menos 6 caracteres')
 ], async (req, res) => {
     console.log('🔑 [RESET PASSWORD] Ruta llamada');
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -606,8 +606,8 @@ app.post('/api/auth/reset-password', [
         );
 
         if (tokens.length === 0) {
-            return res.status(400).json({ 
-                message: 'Token inválido o expirado' 
+            return res.status(400).json({
+                message: 'Token inválido o expirado'
             });
         }
 
@@ -619,22 +619,22 @@ app.post('/api/auth/reset-password', [
 
         // Actualizar contraseña y marcar token como usado
         await db.query('BEGIN');
-        
+
         await db.query(
             'UPDATE usuarios SET password = $1 WHERE id = $2',
             [hashedPassword, usuarioId]
         );
-        
+
         await db.query(
             'UPDATE password_reset_tokens SET usado = TRUE WHERE id = $1',
             [tokenId]
         );
-        
+
         await db.query('COMMIT');
 
         console.log('✅ Contraseña actualizada para usuario:', usuarioId);
-        res.json({ 
-            message: 'Contraseña actualizada correctamente' 
+        res.json({
+            message: 'Contraseña actualizada correctamente'
         });
 
     } catch (err) {
@@ -648,7 +648,7 @@ app.post('/api/auth/reset-password', [
 async function enviarEmailRecuperacion(email, resetLink) {
     try {
         console.log('📧 Enviando email de recuperación con Resend a:', email);
-        
+
         const { data, error } = await resend.emails.send({
             from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>', // Temporal (luego pondrás tu dominio)
             to: ['salamancavivela@gmail.com'], // Temporal (luego pondrás el email del usuario)
@@ -704,7 +704,7 @@ async function enviarEmailRecuperacion(email, resetLink) {
         } else {
             console.log('✅ Email de recuperación enviado con Resend. ID:', data.id);
         }
-        
+
     } catch (err) {
         console.error('❌ Error enviando email de recuperación con Resend:', err);
     }
@@ -717,34 +717,34 @@ console.log('🔐 Configurando rutas de recuperación con preguntas...');
 app.post('/api/auth/verificar-email-seguridad', async (req, res) => {
     console.log('🔐 [VERIFICAR EMAIL] Ruta llamada');
     const { email } = req.body;
-    
+
     if (!email) {
         return res.status(400).json({ message: 'Email requerido' });
     }
-    
+
     try {
         const { rows } = await db.query(
             'SELECT id, pregunta_seguridad FROM usuarios WHERE email = $1',
             [email]
         );
-        
+
         if (rows.length === 0) {
             return res.json({ exists: false, message: 'Email no encontrado' });
         }
-        
+
         if (!rows[0].pregunta_seguridad) {
-            return res.json({ 
-                exists: false, 
-                message: 'Este usuario no tiene configurada pregunta de seguridad' 
+            return res.json({
+                exists: false,
+                message: 'Este usuario no tiene configurada pregunta de seguridad'
             });
         }
-        
-        res.json({ 
-            exists: true, 
+
+        res.json({
+            exists: true,
             usuarioId: rows[0].id,
             pregunta: rows[0].pregunta_seguridad
         });
-        
+
     } catch (err) {
         console.error('❌ Error:', err);
         res.status(500).json({ message: 'Error del servidor' });
@@ -755,28 +755,28 @@ app.post('/api/auth/verificar-email-seguridad', async (req, res) => {
 app.post('/api/auth/verificar-respuesta', async (req, res) => {
     console.log('🔐 [VERIFICAR RESPUESTA] Ruta llamada');
     const { usuarioId, respuesta } = req.body;
-    
+
     if (!usuarioId || !respuesta) {
         return res.status(400).json({ message: 'Datos incompletos' });
     }
-    
+
     try {
         const { rows } = await db.query(
             'SELECT respuesta_seguridad FROM usuarios WHERE id = $1',
             [usuarioId]
         );
-        
+
         if (rows.length === 0) {
             return res.status(404).json({ valid: false, message: 'Usuario no encontrado' });
         }
-        
+
         // Comparar respuestas (case insensitive)
         if (rows[0].respuesta_seguridad.toLowerCase() === respuesta.toLowerCase().trim()) {
             res.json({ valid: true });
         } else {
             res.json({ valid: false, message: 'Respuesta incorrecta' });
         }
-        
+
     } catch (err) {
         console.error('❌ Error:', err);
         res.status(500).json({ message: 'Error del servidor' });
@@ -787,26 +787,26 @@ app.post('/api/auth/verificar-respuesta', async (req, res) => {
 app.post('/api/auth/cambiar-password-seguridad', async (req, res) => {
     console.log('🔐 [CAMBIAR PASSWORD] Ruta llamada');
     const { usuarioId, newPassword } = req.body;
-    
+
     if (!usuarioId || !newPassword) {
         return res.status(400).json({ message: 'Datos incompletos' });
     }
-    
+
     if (newPassword.length < 6) {
         return res.status(400).json({ message: 'La contraseña debe tener al menos 6 caracteres' });
     }
-    
+
     try {
         const hashedPassword = await bcrypt.hash(newPassword, 10);
-        
+
         await db.query(
             'UPDATE usuarios SET password = $1 WHERE id = $2',
             [hashedPassword, usuarioId]
         );
-        
+
         console.log(`✅ Contraseña actualizada para usuario ID: ${usuarioId}`);
         res.json({ message: 'Contraseña actualizada correctamente' });
-        
+
     } catch (err) {
         console.error('❌ Error:', err);
         res.status(500).json({ message: 'Error del servidor' });
@@ -828,7 +828,7 @@ app.get('/api/users/me', async (req, res) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         console.log('✅ [PROFILE] Token válido para usuario:', decoded.userId);
-        
+
         const { rows } = await db.query(
             'SELECT id, nombre, email, fecha_creacion FROM usuarios WHERE id = $1',
             [decoded.userId]
@@ -864,9 +864,9 @@ app.put('/api/users/me', async (req, res) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         console.log('✅ [UPDATE-PROFILE] Token válido para usuario:', decoded.userId);
-        
+
         const { nombre } = req.body;
-        
+
         await db.query(
             'UPDATE usuarios SET nombre = $1 WHERE id = $2',
             [nombre, decoded.userId]
@@ -897,7 +897,7 @@ app.post('/api/users/change-password', async (req, res) => {
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
         console.log('✅ [CHANGE-PASSWORD] Token válido para usuario:', decoded.userId);
-        
+
         const { currentPassword, newPassword } = req.body;
 
         const { rows } = await db.query(
@@ -911,7 +911,7 @@ app.post('/api/users/change-password', async (req, res) => {
         }
 
         const valid = await bcrypt.compare(currentPassword, rows[0].password);
-        
+
         if (!valid) {
             console.log('❌ [CHANGE-PASSWORD] Contraseña actual incorrecta');
             return res.status(401).json({ message: 'Contraseña actual incorrecta' });
@@ -943,7 +943,7 @@ app.post('/api/contact',
     ],
     async (req, res) => {
         console.log('📧 [CONTACT] Ruta llamada');
-        
+
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             console.log('❌ [CONTACT] Errores de validación:', errors.array());
@@ -967,7 +967,7 @@ app.post('/api/contact',
             });
 
             // 3. Responder inmediatamente al usuario
-            res.json({ 
+            res.json({
                 message: "Mensaje recibido correctamente. Te contactaremos pronto.",
                 guardado: true
             });
@@ -983,7 +983,7 @@ app.post('/api/contact',
 async function enviarEmailEnSegundoPlano(name, email, subject, message) {
     try {
         console.log('📧 Enviando email de contacto con Resend...');
-        
+
         const { data, error } = await resend.emails.send({
             from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
             to: ['salamancavivela@gmail.com'],
@@ -1005,7 +1005,7 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
         } else {
             console.log('✅ Email de contacto enviado con Resend. ID:', data.id);
         }
-        
+
     } catch (err) {
         console.log('⚠️ Error en email de contacto (no crítico):', err.message);
     }
@@ -1022,7 +1022,7 @@ async function getOrCreateCart(usuarioId) {
         'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
         [usuarioId]
     );
-    
+
     if (carrito.length === 0) {
         console.log(`🛒 [getOrCreateCart] Creando nuevo carrito para usuario ${usuarioId}`);
         const { rows: newCart } = await db.query(
@@ -1032,7 +1032,7 @@ async function getOrCreateCart(usuarioId) {
         console.log(`✅ [getOrCreateCart] Carrito creado ID: ${newCart[0].id}`);
         return newCart[0].id;
     }
-    
+
     console.log(`✅ [getOrCreateCart] Carrito existente ID: ${carrito[0].id}`);
     return carrito[0].id;
 }
@@ -1233,7 +1233,7 @@ app.post('/api/cart/update', async (req, res) => {
                 'UPDATE cart_items SET cantidad = cantidad + $1 WHERE carrito_id = $2 AND producto_id = $3 AND cantidad > $4',
                 [delta, carritoId, productId, -delta]
             );
-            
+
             await db.query(
                 'DELETE FROM cart_items WHERE carrito_id = $1 AND producto_id = $2 AND cantidad <= 0',
                 [carritoId, productId]
@@ -1299,7 +1299,7 @@ app.get('/api/productos', async (req, res) => {
     console.log('📦 [PRODUCTOS] Ruta llamada');
     const { categoria } = req.query;
     console.log(`📦 [PRODUCTOS] Categoría: ${categoria || 'todas'}`);
-    
+
     try {
         let query = `
             SELECT p.*, c.nombre as categoria_nombre
@@ -1307,18 +1307,18 @@ app.get('/api/productos', async (req, res) => {
             LEFT JOIN categorias c ON p.categoria_id = c.id
         `;
         let params = [];
-        
+
         if (categoria) {
             query += ` WHERE LOWER(c.nombre) = LOWER($1)`;
             params.push(categoria);
         }
-        
+
         query += ` ORDER BY p.nombre ASC`;
-        
+
         const { rows: productos } = await db.query(query, params);
         console.log(`✅ [PRODUCTOS] Encontrados: ${productos.length}`);
         res.json(productos);
-        
+
     } catch (err) {
         console.error('❌ [PRODUCTOS] Error:', err);
         res.status(500).json({ message: 'Error al obtener productos' });
@@ -1329,7 +1329,7 @@ console.log('✅ Ruta GET /api/productos configurada');
 app.get('/api/productos/:id', async (req, res) => {
     const { id } = req.params;
     console.log(`📦 [PRODUCTO DETALLE] Ruta llamada para ID: ${id}`);
-    
+
     try {
         const { rows: productos } = await db.query(
             `SELECT p.*, c.nombre as categoria_nombre
@@ -1338,15 +1338,15 @@ app.get('/api/productos/:id', async (req, res) => {
              WHERE p.id = $1`,
             [id]
         );
-        
+
         if (productos.length === 0) {
             console.log('❌ [PRODUCTO DETALLE] Producto no encontrado');
             return res.status(404).json({ message: 'Producto no encontrado' });
         }
-        
+
         console.log('✅ [PRODUCTO DETALLE] Producto encontrado');
         res.json(productos[0]);
-        
+
     } catch (err) {
         console.error('❌ [PRODUCTO DETALLE] Error:', err);
         res.status(500).json({ message: 'Error al obtener producto' });
@@ -1416,7 +1416,7 @@ app.get('/api/productos/:productoId/resenas', async (req, res) => {
 app.get('/api/puede-resenar/:productoId', verificarUsuario, async (req, res) => {
     const { productoId } = req.params;
     const usuarioId = req.usuarioId;
-    
+
     console.log(`⭐ [PUEDE RESEÑAR] Usuario ${usuarioId}, Producto ${productoId}`);
 
     try {
@@ -1441,7 +1441,7 @@ app.get('/api/puede-resenar/:productoId', verificarUsuario, async (req, res) => 
             [usuarioId, productoId]
         );
 
-        res.json({ 
+        res.json({
             puedeResenar: yaResenado.length === 0,
             mensaje: yaResenado.length > 0 ? 'Ya has reseñado este producto' : 'Puedes reseñar'
         });
@@ -1508,17 +1508,17 @@ app.post('/api/resenas', verificarUsuario, async (req, res) => {
         );
 
         console.log(`✅ Reseña creada ID: ${nuevaResena[0].id}`);
-        res.json({ 
+        res.json({
             message: 'Reseña enviada correctamente. Pendiente de aprobación.',
-            id: nuevaResena[0].id 
+            id: nuevaResena[0].id
         });
 
     } catch (err) {
         console.error('❌ Error al guardar reseña:', err);
         console.error('❌ Detalle:', err.message);
-        res.status(500).json({ 
+        res.status(500).json({
             message: 'Error al guardar la reseña',
-            error: err.message 
+            error: err.message
         });
     }
 });
@@ -1528,7 +1528,7 @@ app.post('/api/cupones/validar', async (req, res) => {
     console.log('🎫 [CUPON VALIDAR] Ruta llamada');
     const { codigo, subtotal, usuarioId } = req.body;
     console.log(`🎫 [CUPON VALIDAR] Código: ${codigo}, Subtotal: ${subtotal}`);
-    
+
     if (!codigo) {
         console.log('❌ [CUPON VALIDAR] Código requerido');
         return res.status(400).json({ message: 'Código de cupón requerido' });
@@ -1552,9 +1552,9 @@ app.post('/api/cupones/validar', async (req, res) => {
 
         if (subtotal && cupon.monto_minimo > subtotal) {
             console.log(`❌ [CUPON VALIDAR] Monto mínimo no alcanzado: ${cupon.monto_minimo}`);
-            return res.json({ 
-                valido: false, 
-                message: `Monto mínimo de ${parseFloat(cupon.monto_minimo).toFixed(2)}€` 
+            return res.json({
+                valido: false,
+                message: `Monto mínimo de ${parseFloat(cupon.monto_minimo).toFixed(2)}€`
             });
         }
 
@@ -1616,13 +1616,13 @@ app.post('/api/create-checkout-session',
     ],
     async (req, res) => {
         console.log('💳 [CHECKOUT] Ruta llamada');
-        
+
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             console.log('❌ [CHECKOUT] Errores de validación:', errors.array());
             return res.status(400).json({ errors: errors.array() });
         }
-        
+
         const authHeader = req.headers.authorization;
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             console.log('❌ [CHECKOUT] No autorizado - sin token');
@@ -1647,7 +1647,7 @@ app.post('/api/create-checkout-session',
                     direccionData.codigo_postal || '',
                     direccionData.pais || ''
                 ].filter(Boolean);
-                
+
                 direccionEnvio = partesDireccion.join(', ');
                 direccionDetalles = JSON.stringify(direccionData);
                 console.log('📍 [CHECKOUT] Dirección:', direccionEnvio);
@@ -1702,16 +1702,16 @@ app.post('/api/create-checkout-session',
                     'SELECT * FROM cupones WHERE id = $1 AND activo = TRUE AND (fecha_fin IS NULL OR fecha_fin >= NOW())',
                     [req.body.cuponId]
                 );
-                
+
                 if (cupones.length > 0) {
                     const cupon = cupones[0];
                     console.log(`🎫 Cupón encontrado: ${cupon.codigo}, Tipo: ${cupon.tipo_descuento}, Valor: ${cupon.valor_descuento}`);
-                    
+
                     // Verificar monto mínimo
                     if (!cupon.monto_minimo || subtotal >= parseFloat(cupon.monto_minimo)) {
                         cuponId = cupon.id;
                         cuponAplicado = cupon;
-                        
+
                         if (cupon.tipo_descuento === 'porcentaje') {
                             descuento = (subtotal * parseFloat(cupon.valor_descuento)) / 100;
                             console.log(`💰 Descuento porcentaje ${cupon.valor_descuento}%: ${descuento.toFixed(2)}€`);
@@ -1719,7 +1719,7 @@ app.post('/api/create-checkout-session',
                             descuento = parseFloat(cupon.valor_descuento);
                             console.log(`💰 Descuento fijo: ${descuento.toFixed(2)}€`);
                         }
-                        
+
                         // No permitir descuento mayor que el subtotal
                         if (descuento > subtotal) {
                             descuento = subtotal;
@@ -1737,108 +1737,108 @@ app.post('/api/create-checkout-session',
             const totalFinal = Math.max(0, subtotalConDescuento + shipping);
             console.log(`💰 [CHECKOUT] Descuento: ${descuento.toFixed(2)}€, Subtotal con descuento: ${subtotalConDescuento.toFixed(2)}€, Total final: ${totalFinal.toFixed(2)}€`);
 
-          // ===== Crear cupón en Stripe si hay descuento =====
-let discounts = [];
-if (descuento > 0 && cuponAplicado) {
-    try {
-        console.log(`🎫 Creando cupón en Stripe para: ${cuponAplicado.codigo}`);
-        
-        const cuponData = {
-            name: cuponAplicado.codigo,
-            duration: 'once',
-            max_redemptions: 1,
-            metadata: {
-                local_coupon_id: cuponAplicado.id.toString()
+            // ===== Crear cupón en Stripe si hay descuento =====
+            let discounts = [];
+            if (descuento > 0 && cuponAplicado) {
+                try {
+                    console.log(`🎫 Creando cupón en Stripe para: ${cuponAplicado.codigo}`);
+
+                    const cuponData = {
+                        name: cuponAplicado.codigo,
+                        duration: 'once',
+                        max_redemptions: 1,
+                        metadata: {
+                            local_coupon_id: cuponAplicado.id.toString()
+                        }
+                    };
+
+                    // Añadir el tipo de descuento correspondiente
+                    if (cuponAplicado.tipo_descuento === 'porcentaje') {
+                        cuponData.percent_off = cuponAplicado.valor_descuento;
+                        console.log(`💰 Cupón porcentaje: ${cuponAplicado.valor_descuento}%`);
+                    } else {
+                        cuponData.amount_off = Math.round(cuponAplicado.valor_descuento * 100);
+                        cuponData.currency = 'eur';
+                        console.log(`💰 Cupón fijo: ${cuponAplicado.valor_descuento}€ (${cuponData.amount_off} céntimos)`);
+                    }
+
+                    const cuponStripe = await stripe.coupons.create(cuponData);
+                    discounts.push({ coupon: cuponStripe.id });
+                    console.log('✅ Cupón de Stripe creado con ID:', cuponStripe.id);
+
+                } catch (stripeError) {
+                    console.error('❌ Error creando cupón en Stripe:', stripeError);
+                    // Si falla, continuamos sin el cupón visible (el precio final ya está calculado)
+                }
             }
-        };
 
-        // Añadir el tipo de descuento correspondiente
-        if (cuponAplicado.tipo_descuento === 'porcentaje') {
-            cuponData.percent_off = cuponAplicado.valor_descuento;
-            console.log(`💰 Cupón porcentaje: ${cuponAplicado.valor_descuento}%`);
-        } else {
-            cuponData.amount_off = Math.round(cuponAplicado.valor_descuento * 100);
-            cuponData.currency = 'eur';
-            console.log(`💰 Cupón fijo: ${cuponAplicado.valor_descuento}€ (${cuponData.amount_off} céntimos)`);
-        }
+            // ===== Construir line items (SOLO POSITIVOS) =====
+            let lineItems = items.map(item => ({
+                price_data: {
+                    currency: 'eur',
+                    product_data: {
+                        name: item.nombre.substring(0, 100)
+                    },
+                    unit_amount: Math.round(parseFloat(item.precio_unitario) * 100),
+                },
+                quantity: Math.min(parseInt(item.cantidad) || 1, 99),
+            }));
 
-        const cuponStripe = await stripe.coupons.create(cuponData);
-        discounts.push({ coupon: cuponStripe.id });
-        console.log('✅ Cupón de Stripe creado con ID:', cuponStripe.id);
-        
-    } catch (stripeError) {
-        console.error('❌ Error creando cupón en Stripe:', stripeError);
-        // Si falla, continuamos sin el cupón visible (el precio final ya está calculado)
-    }
-}
+            //añadir gastos de envío
+            if (shipping > 0) {
+                lineItems.push({
+                    price_data: {
+                        currency: 'eur',
+                        product_data: { name: 'Gastos de envío' },
+                        unit_amount: Math.round(shipping * 100),
+                    },
+                    quantity: 1,
+                });
+            }
 
-// ===== Construir line items (SOLO POSITIVOS) =====
-let lineItems = items.map(item => ({
-    price_data: {
-        currency: 'eur',
-        product_data: { 
-            name: item.nombre.substring(0, 100)
-        },
-        unit_amount: Math.round(parseFloat(item.precio_unitario) * 100),
-    },
-    quantity: Math.min(parseInt(item.cantidad) || 1, 99),
-}));
-
-//añadir gastos de envío
-if (shipping > 0) {
-    lineItems.push({
-        price_data: {
-            currency: 'eur',
-            product_data: { name: 'Gastos de envío' },
-            unit_amount: Math.round(shipping * 100),
-        },
-        quantity: 1,
-    });
-}
-
-// ===== Crear sesión de Stripe CON descuentos visibles =====
-let sessionParams = {
-    payment_method_types: ['card'],
-    line_items: lineItems,
-    mode: 'payment',
-    discounts: discounts, // ← ESTO HACE VISIBLE EL DESCUENTO
-    success_url: `${process.env.BASE_URL}/pedido-exitoso.html?session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
-    shipping_address_collection: { allowed_countries: ['ES'] },
-    metadata: {
-    usuarioId: String(usuarioId),
-    carritoId: String(carritoId),
-    subtotal: subtotal.toFixed(2),
-    descuento: descuento.toFixed(2),
-    descuento_tipo: cuponAplicado?.tipo_descuento || '',
-    descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
-    cupon_codigo: cuponAplicado?.codigo || '',
-    subtotal_con_descuento: subtotalConDescuento.toFixed(2),
-    shipping: shipping.toFixed(2),
-    total: totalFinal.toFixed(2),
-    cuponId: cuponId ? String(cuponId) : '',
-    direccion_nombre: direccionData?.nombre || '',
-    direccion_calle: direccionData?.calle || '',
-    direccion_piso: direccionData?.piso || '',
-    direccion_ciudad: direccionData?.ciudad || '',
-    direccion_cp: direccionData?.codigo_postal || '',
-    direccion_pais: direccionData?.pais || '',
-    // 🎁 NUEVO: Datos de regalo
-    gift_active: req.body.gift?.active ? 'true' : 'false',
-    gift_message: req.body.gift?.message || '',
-    gift_cost: req.body.gift?.active ? '2.00' : '0'
-},
-};
+            // ===== Crear sesión de Stripe CON descuentos visibles =====
+            let sessionParams = {
+                payment_method_types: ['card'],
+                line_items: lineItems,
+                mode: 'payment',
+                discounts: discounts, // ← ESTO HACE VISIBLE EL DESCUENTO
+                success_url: `${process.env.BASE_URL}/pedido-exitoso.html?session_id={CHECKOUT_SESSION_ID}`,
+                cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
+                shipping_address_collection: { allowed_countries: ['ES'] },
+                metadata: {
+                    usuarioId: String(usuarioId),
+                    carritoId: String(carritoId),
+                    subtotal: subtotal.toFixed(2),
+                    descuento: descuento.toFixed(2),
+                    descuento_tipo: cuponAplicado?.tipo_descuento || '',
+                    descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
+                    cupon_codigo: cuponAplicado?.codigo || '',
+                    subtotal_con_descuento: subtotalConDescuento.toFixed(2),
+                    shipping: shipping.toFixed(2),
+                    total: totalFinal.toFixed(2),
+                    cuponId: cuponId ? String(cuponId) : '',
+                    direccion_nombre: direccionData?.nombre || '',
+                    direccion_calle: direccionData?.calle || '',
+                    direccion_piso: direccionData?.piso || '',
+                    direccion_ciudad: direccionData?.ciudad || '',
+                    direccion_cp: direccionData?.codigo_postal || '',
+                    direccion_pais: direccionData?.pais || '',
+                    // 🎁 NUEVO: Datos de regalo
+                    gift_active: req.body.gift?.active ? 'true' : 'false',
+                    gift_message: req.body.gift?.message || '',
+                    gift_cost: req.body.gift?.active ? '2.00' : '0'
+                },
+            };
 
             const session = await stripe.checkout.sessions.create(sessionParams);
             console.log('✅ [CHECKOUT] Sesión de Stripe creada:', session.id);
-            
+
             res.json({ id: session.id, url: session.url });
 
         } catch (err) {
             console.error('❌ [CHECKOUT] Error:', err);
-            const errorMessage = process.env.NODE_ENV === 'production' 
-                ? 'Error al procesar el pago' 
+            const errorMessage = process.env.NODE_ENV === 'production'
+                ? 'Error al procesar el pago'
                 : err.message;
             res.status(500).json({ message: errorMessage });
         }
@@ -1853,10 +1853,10 @@ console.log('📦 Configurando rutas de pedidos...');
 app.get('/api/orders/eligible-for-return', async (req, res) => {
     console.log('\n========== DEVOLUCIONES ==========');
     console.log('📦 [ELIGIBLE-RETURN] Ruta llamada');
-    
+
     const authHeader = req.headers.authorization;
     console.log('Auth header existe:', !!authHeader);
-    
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log('❌ [ELIGIBLE-RETURN] No autorizado - header inválido');
         return res.status(401).json({ message: 'No autorizado' });
@@ -1887,7 +1887,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
         );
 
         console.log(`📦 [ELIGIBLE-RETURN] Pedidos encontrados: ${pedidos.length}`);
-        
+
         if (pedidos.length === 0) {
             console.log('ℹ️ [ELIGIBLE-RETURN] No hay pedidos elegibles');
             return res.json([]);
@@ -1906,7 +1906,7 @@ app.get('/api/orders/eligible-for-return', async (req, res) => {
                  WHERE oi.pedido_id = $1`,
                 [pedido.id]
             );
-            
+
             console.log(`   → ${items.length} items encontrados`);
             return { ...pedido, items };
         }));
@@ -1967,7 +1967,7 @@ console.log('✅ Ruta GET /api/orders/my-orders configurada');
 app.get('/api/orders/:orderId', async (req, res) => {
     const { orderId } = req.params;
     console.log(`📦 [ORDER DETAIL] Ruta llamada para pedido: ${orderId}`);
-    
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log('❌ [ORDER DETAIL] No autorizado - sin token');
@@ -2004,7 +2004,7 @@ console.log('✅ Ruta GET /api/orders/:orderId configurada');
 app.get('/api/orders/:orderId/items', async (req, res) => {
     const { orderId } = req.params;
     console.log(`📦 [ORDER ITEMS] Ruta llamada para pedido: ${orderId}`);
-    
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         console.log('❌ [ORDER ITEMS] No autorizado - sin token');
@@ -2054,7 +2054,7 @@ console.log('✅ Ruta GET /api/orders/:orderId/items configurada');
 
 app.post('/api/pedidos/recogida-tienda', async (req, res) => {
     console.log('🏪 [RECOGIDA TIENDA] Ruta llamada');
-    
+
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
         return res.status(401).json({ message: 'No autorizado' });
@@ -2064,13 +2064,13 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
-        
+
         const { items, subtotal, gift } = req.body;
-        
+
         if (!items || items.length === 0) {
             return res.status(400).json({ message: 'Carrito vacío' });
         }
-        
+
         // ===== LOGS CRÍTICOS PARA DEPURACIÓN =====
         console.log('📦 Items recibidos en backend:', items.length);
         items.forEach((item, i) => {
@@ -2078,17 +2078,17 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
             console.log(`      ID: ${item.id}, Talla: ${item.talla}, Tipo talla: ${typeof item.talla}`);
         });
         // ==========================================
-        
+
         // 🎁 Obtener datos de regalo
         const giftActive = gift?.active || false;
         const giftMessage = gift?.message || '';
         const giftCost = giftActive ? 2.00 : 0;
-        
+
         console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
-        
+
         // Generar código de recogida
         const codigoRecogida = 'REC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
-        
+
         // Insertar pedido
         const { rows: pedidoRows } = await db.query(
             `INSERT INTO pedidos 
@@ -2099,33 +2099,33 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
              RETURNING id`,
             [usuarioId, subtotal, codigoRecogida, giftActive, giftMessage, giftCost]
         );
-        
+
         const pedidoId = pedidoRows[0].id;
-        
+
         // Guardar items del pedido (con talla)
         console.log('💾 Guardando items para pedido:', pedidoId);
         for (const item of items) {
-            console.log('   → Guardando item:', { 
-                id: item.id, 
+            console.log('   → Guardando item:', {
+                id: item.id,
                 talla: item.talla,
                 quantity: item.quantity,
-                price: item.price 
+                price: item.price
             });
-            
+
             await db.query(
                 'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
                 [pedidoId, item.id, item.quantity, item.price, item.talla || null]
             );
         }
-        
+
         console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
-        
-        res.json({ 
+
+        res.json({
             message: 'Pedido de recogida creado correctamente',
             pedidoId: pedidoId,
             codigoRecogida: codigoRecogida
         });
-        
+
     } catch (err) {
         console.error('❌ Error en recogida tienda:', err);
         res.status(500).json({ message: 'Error al crear pedido de recogida' });
@@ -2147,12 +2147,12 @@ async function verificarAdmin(req, res, next) {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         const { rows } = await db.query('SELECT is_admin FROM usuarios WHERE id = $1', [decoded.userId]);
-        
+
         if (!rows[0]?.is_admin) {
             console.log('❌ [VERIFICAR ADMIN] Acceso denegado - no es admin');
             return res.status(403).json({ message: 'Acceso denegado' });
         }
-        
+
         console.log('✅ [VERIFICAR ADMIN] Admin verificado');
         req.usuarioId = decoded.userId;
         next();
@@ -2206,7 +2206,7 @@ console.log('✅ Ruta GET /api/admin/pedidos configurada');
 app.put('/api/admin/pedidos/:id', verificarAdmin, orderStatusValidator, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN PEDIDOS UPDATE] Ruta llamada para pedido: ${id}`);
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         console.log('❌ [ADMIN PEDIDOS UPDATE] Errores de validación:', errors.array());
@@ -2243,7 +2243,7 @@ app.get('/api/admin/ultimos-pedidos', verificarAdmin, async (req, res) => {
         console.log('❌ [ADMIN ULTIMOS PEDIDOS] Límite inválido:', limite);
         return res.status(400).json({ message: 'Límite inválido' });
     }
-    
+
     try {
         const { rows: pedidos } = await db.query(
             `SELECT p.*, u.nombre as cliente_nombre
@@ -2306,7 +2306,7 @@ console.log('✅ Ruta POST /api/admin/cupones configurada');
 app.put('/api/admin/cupones/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN CUPONES UPDATE] Ruta llamada para cupón: ${id}`);
-    
+
     const { activo } = req.body;
 
     if (typeof activo !== 'boolean') {
@@ -2374,7 +2374,7 @@ console.log('✅ Ruta POST /api/admin/productos configurada');
 app.put('/api/admin/productos/:id', verificarAdmin, productValidator, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN PRODUCTOS UPDATE] Ruta llamada para producto: ${id}`);
-    
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         console.log('❌ [ADMIN PRODUCTOS UPDATE] Errores de validación:', errors.array());
@@ -2435,7 +2435,7 @@ console.log('✅ Ruta GET /api/admin/devoluciones configurada');
 app.put('/api/admin/devoluciones/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN DEVOLUCIONES UPDATE] Ruta llamada para devolución: ${id}`);
-    
+
     const { estado } = req.body;
 
     const estadosValidos = ['pendiente', 'aprobada', 'rechazada', 'completada'];
@@ -2481,7 +2481,7 @@ console.log('✅ Ruta GET /api/admin/resenas configurada');
 app.put('/api/admin/resenas/:id', verificarAdmin, async (req, res) => {
     const { id } = req.params;
     console.log(`👑 [ADMIN RESEÑAS UPDATE] Ruta llamada para reseña: ${id}`);
-    
+
     const { estado } = req.body;
 
     const estadosValidos = ['pendiente', 'aprobada', 'rechazada'];
@@ -2523,15 +2523,15 @@ app.delete('/api/admin/resenas/:id', verificarAdmin, async (req, res) => {
 
         // Eliminar directamente la reseña (asumiendo que no hay tabla de votos)
         await db.query('DELETE FROM reseñas WHERE id = $1', [id]);
-        
+
         console.log(`✅ [ADMIN RESEÑAS DELETE] Reseña ${id} eliminada`);
         res.json({ message: 'Reseña eliminada correctamente' });
 
     } catch (err) {
         console.error('❌ [ADMIN RESEÑAS DELETE] Error:', err);
-        res.status(500).json({ 
+        res.status(500).json({
             message: 'Error al eliminar la reseña',
-            error: err.message 
+            error: err.message
         });
     }
 });
@@ -2599,7 +2599,7 @@ app.post('/api/emergency-clear-cart', async (req, res) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
-        
+
         console.log(`🚨 Buscando carrito para usuario ${usuarioId}`);
         const { rows: carrito } = await db.query(
             'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
@@ -2612,14 +2612,14 @@ app.post('/api/emergency-clear-cart', async (req, res) => {
 
         const carritoId = carrito[0].id;
         console.log(`🚨 Eliminando items del carrito ${carritoId}`);
-        
+
         const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-        
+
         console.log(`🚨 Eliminadas ${deleteResult.rowCount} filas`);
-        res.json({ 
-            message: 'Carrito vaciado manualmente', 
+        res.json({
+            message: 'Carrito vaciado manualmente',
             vaciado: true,
-            filas: deleteResult.rowCount 
+            filas: deleteResult.rowCount
         });
 
     } catch (err) {
