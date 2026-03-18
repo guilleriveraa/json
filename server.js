@@ -1785,16 +1785,16 @@ let lineItems = items.map(item => ({
 }));
 
 // Añadir gastos de envío
-if (shipping > 0) {
-    lineItems.push({
-        price_data: {
-            currency: 'eur',
-            product_data: { name: 'Gastos de envío' },
-            unit_amount: Math.round(shipping * 100),
-        },
-        quantity: 1,
-    });
-}
+//if (shipping > 0) {
+//    lineItems.push({
+  //      price_data: {
+    //        currency: 'eur',
+      //      product_data: { name: 'Gastos de envío' },
+        //    unit_amount: Math.round(shipping * 100),
+        //},
+        //quantity: 1,
+    //});
+//}
 
 // ===== Crear sesión de Stripe CON descuentos visibles =====
 let sessionParams = {
