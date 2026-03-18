@@ -1784,17 +1784,17 @@ let lineItems = items.map(item => ({
     quantity: Math.min(parseInt(item.cantidad) || 1, 99),
 }));
 
-// Añadir gastos de envío
-//if (shipping > 0) {
-//    lineItems.push({
-  //      price_data: {
-    //        currency: 'eur',
-      //      product_data: { name: 'Gastos de envío' },
-        //    unit_amount: Math.round(shipping * 100),
-        //},
-        //quantity: 1,
-    //});
-//}
+//añadir gastos de envío
+if (shipping > 0) {
+    lineItems.push({
+        price_data: {
+            currency: 'eur',
+            product_data: { name: 'Gastos de envío' },
+            unit_amount: Math.round(shipping * 100),
+        },
+        quantity: 1,
+    });
+}
 
 // ===== Crear sesión de Stripe CON descuentos visibles =====
 let sessionParams = {
