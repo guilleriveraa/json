@@ -2168,7 +2168,7 @@ const productValidator = [
     body('descripcion').optional().trim().escape(),
     body('precio').isFloat({ min: 0 }),
     body('categoria_id').isInt(),
-    body('imagen').optional().isURL()
+    body('imagen').optional().isString().trim()
 ];
 
 const couponValidator = [
