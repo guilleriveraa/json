@@ -111,7 +111,7 @@ console.log('✅ CORS configurado con comodín para Vercel');
 // 4. Rate Limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100,
+    max: 500,
     message: { error: 'Demasiadas peticiones desde esta IP, intenta más tarde.' },
     standardHeaders: true,
     legacyHeaders: false,
