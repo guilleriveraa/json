@@ -92,7 +92,7 @@ console.log('🔧 Configurando CORS...');
 
 const corsOptions = {
     origin: process.env.NODE_ENV === 'production'
-        ? ['https://latiendasalamancavivela.com', 'https://www.latiendasalamancavivela.com', 'https://www.latiendasalamancavivela.es', 'https://latiendasalamancavivela.es']
+        ? ['https://latiendasalamancavivela.com', 'https://www.latiendasalamancavivela.com', 'https://www.latiendasalamancavivela.es', 'https://latiendasalamancavivela.es', 'https://fronted-maac5qzqd-guilleriveraas-projects.vercel.app']
         : ['http://localhost:5500', 'http://127.0.0.1:5500'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
