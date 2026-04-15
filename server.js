@@ -17,9 +17,25 @@ const nodemailer = require('nodemailer');
 console.log('✅ Nodemailer cargado');
 
 require('dotenv').config();
+// ===== CONFIGURACIÓN DE NODEMAILER =====
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+    }
+});
+
+transporter.verify((error, success) => {
+    if (error) {
+        console.error('❌ Error de configuración de email:', error);
+    } else {
+        console.log('✅ Servidor de correo configurado correctamente');
+    }
+});
 console.log('✅ Dotenv configurado');
-const { Resend } = require('resend');
-const resend = new Resend(process.env.RESEND_API_KEY);
+//const { Resend } = require('resend');
+//const resend = new Resend(process.env.RESEND_API_KEY);
 const validateEmail = require('./services/emailValidation');
 console.log('✅ EmailValidation cargado');
 
@@ -647,11 +663,11 @@ app.post('/api/auth/reset-password', [
 // Función auxiliar para enviar email de recuperación con Resend
 async function enviarEmailRecuperacion(email, resetLink) {
     try {
-        console.log('📧 Enviando email de recuperación con Resend a:', email);
+        console.log('📧 Enviando email de recuperación con Nodemailer a:', email);
 
-        const { data, error } = await resend.emails.send({
-            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>', // Temporal (luego pondrás tu dominio)
-            to: ['salamancavivela@gmail.com'], // Temporal (luego pondrás el email del usuario)
+        const mailOptions = {
+            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
+            to: email, // ← Enviar al usuario que solicita recuperación
             subject: 'Recuperación de contraseña - SalamancaVivela',
             html: `
                 <!DOCTYPE html>
@@ -697,16 +713,13 @@ async function enviarEmailRecuperacion(email, resetLink) {
                 </body>
                 </html>
             `
-        });
+        };
 
-        if (error) {
-            console.error('❌ Error de Resend:', error);
-        } else {
-            console.log('✅ Email de recuperación enviado con Resend. ID:', data.id);
-        }
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Email de recuperación enviado con Nodemailer. ID:', info.messageId);
 
     } catch (err) {
-        console.error('❌ Error enviando email de recuperación con Resend:', err);
+        console.error('❌ Error enviando email de recuperación:', err);
     }
 }
 
@@ -982,11 +995,11 @@ app.post('/api/contact',
 // Función para enviar email de contacto en segundo plano con Resend
 async function enviarEmailEnSegundoPlano(name, email, subject, message) {
     try {
-        console.log('📧 Enviando email de contacto con Resend...');
+        console.log('📧 Enviando email de contacto con Nodemailer...');
 
-        const { data, error } = await resend.emails.send({
-            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
-            to: ['salamancavivela@gmail.com'],
+        const mailOptions = {
+            from: `"SalamancaVivela" <${process.env.EMAIL_USER}>`,
+            to: process.env.ADMIN_EMAIL || 'salamancavivela@gmail.com', // ← Correo donde recibirás los mensajes
             subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
             html: `
                 <h2>Nuevo mensaje de contacto</h2>
@@ -998,13 +1011,10 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
                 <hr>
                 <p style="color: #666;">Recibido el ${new Date().toLocaleString('es-ES')}</p>
             `
-        });
+        };
 
-        if (error) {
-            console.error('❌ Error de Resend en contacto:', error);
-        } else {
-            console.log('✅ Email de contacto enviado con Resend. ID:', data.id);
-        }
+        const info = await transporter.sendMail(mailOptions);
+        console.log('✅ Email de contacto enviado con Nodemailer. ID:', info.messageId);
 
     } catch (err) {
         console.log('⚠️ Error en email de contacto (no crítico):', err.message);
