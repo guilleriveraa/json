@@ -2280,9 +2280,11 @@ console.log('✅ Ruta GET /api/orders/:orderId/items configurada');
 
 app.post('/api/pedidos/recogida-tienda', async (req, res) => {
     console.log('🏪 [RECOGIDA TIENDA] Ruta llamada');
+    console.log('📦 Body recibido:', JSON.stringify(req.body, null, 2));
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        console.log('❌ No autorizado - sin token');
         return res.status(401).json({ message: 'No autorizado' });
     }
 
@@ -2290,32 +2292,32 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, JWT_SECRET);
         const usuarioId = decoded.userId;
+        console.log('✅ Usuario ID:', usuarioId);
 
         const { items, subtotal, gift } = req.body;
 
         if (!items || items.length === 0) {
+            console.log('❌ Carrito vacío');
             return res.status(400).json({ message: 'Carrito vacío' });
         }
 
-        // ===== LOGS CRÍTICOS PARA DEPURACIÓN =====
-        console.log('📦 Items recibidos en backend:', items.length);
+        console.log('📦 Items recibidos:', items.length);
         items.forEach((item, i) => {
             console.log(`   Item ${i}:`, JSON.stringify(item));
-            console.log(`      ID: ${item.id}, Talla: ${item.talla}, Tipo talla: ${typeof item.talla}`);
         });
-        // ==========================================
 
         // 🎁 Obtener datos de regalo
         const giftActive = gift?.active || false;
         const giftMessage = gift?.message || '';
         const giftCost = giftActive ? 2.00 : 0;
-
         console.log('🎁 Datos de regalo:', { giftActive, giftMessage, giftCost });
 
         // Generar código de recogida
         const codigoRecogida = 'REC-' + Math.random().toString(36).substring(2, 8).toUpperCase();
+        console.log('🔑 Código recogida:', codigoRecogida);
 
         // Insertar pedido
+        console.log('📝 Insertando pedido...');
         const { rows: pedidoRows } = await db.query(
             `INSERT INTO pedidos 
              (usuario_id, total, estado, fecha, direccion_envio, metodo_pago, estado_pago, codigo_recogida,
@@ -2327,28 +2329,23 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         );
 
         const pedidoId = pedidoRows[0].id;
+        console.log('✅ Pedido insertado ID:', pedidoId);
 
-        // Guardar items del pedido (con talla)
-        console.log('💾 Guardando items para pedido:', pedidoId);
+        // Guardar items del pedido
+        console.log('💾 Guardando items...');
         for (const item of items) {
-            console.log('   → Guardando item:', {
-                id: item.id,
-                talla: item.talla,
-                quantity: item.quantity,
-                price: item.price
-            });
-
+            console.log(`   → Item: id=${item.id}, quantity=${item.quantity}, price=${item.price}, talla=${item.talla}`);
             await db.query(
                 'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
                 [pedidoId, item.id, item.quantity, item.price, item.talla || null]
             );
         }
+        console.log('✅ Items guardados');
 
-        console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
+        // 🔥 ENVIAR EMAIL (si tienes la función)
+        // await enviarEmailPedido(pedidoId, usuarioId, subtotal, items, 'Recoger en tienda');
 
-        console.log(`🎉 Pedido creado ID: ${pedidoId}`);
-        await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
-
+        console.log(`✅ Pedido de recogida creado ID: ${pedidoId}`);
         res.json({
             message: 'Pedido de recogida creado correctamente',
             pedidoId: pedidoId,
@@ -2356,8 +2353,13 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('❌ Error en recogida tienda:', err);
-        res.status(500).json({ message: 'Error al crear pedido de recogida' });
+        console.error('❌ Error en recogida tienda:');
+        console.error('   Mensaje:', err.message);
+        console.error('   Stack:', err.stack);
+        res.status(500).json({
+            message: 'Error al crear pedido de recogida',
+            error: err.message
+        });
     }
 });
 
