@@ -1785,8 +1785,11 @@ app.post('/api/create-checkout-session',
                 quantity: Math.min(parseInt(item.cantidad) || 1, 99),
             }));
 
-            //añadir gastos de envío
-            if (shipping > 0) {
+            // 🔥 NUEVO: Verificar si es recogida en tienda (NO cobrar envío)
+            const esRecogidaTienda = req.body.esRecogidaTienda === true;
+
+            //añadir gastos de envío SOLO si NO es recogida en tienda
+            if (!esRecogidaTienda && shipping > 0) {
                 lineItems.push({
                     price_data: {
                         currency: 'eur',
@@ -1802,10 +1805,9 @@ app.post('/api/create-checkout-session',
                 payment_method_types: ['card'],
                 line_items: lineItems,
                 mode: 'payment',
-                discounts: discounts, // ← ESTO HACE VISIBLE EL DESCUENTO
+                discounts: discounts,
                 success_url: `${process.env.BASE_URL}/pedido-exitoso.html?session_id={CHECKOUT_SESSION_ID}`,
                 cancel_url: `${process.env.BASE_URL}/carrito.html?cancelado=true`,
-                shipping_address_collection: { allowed_countries: ['ES'] },
                 metadata: {
                     usuarioId: String(usuarioId),
                     carritoId: String(carritoId),
@@ -1815,7 +1817,7 @@ app.post('/api/create-checkout-session',
                     descuento_valor: cuponAplicado?.valor_descuento?.toString() || '',
                     cupon_codigo: cuponAplicado?.codigo || '',
                     subtotal_con_descuento: subtotalConDescuento.toFixed(2),
-                    shipping: shipping.toFixed(2),
+                    shipping: esRecogidaTienda ? '0' : shipping.toFixed(2),
                     total: totalFinal.toFixed(2),
                     cuponId: cuponId ? String(cuponId) : '',
                     direccion_nombre: direccionData?.nombre || '',
@@ -1823,13 +1825,17 @@ app.post('/api/create-checkout-session',
                     direccion_piso: direccionData?.piso || '',
                     direccion_ciudad: direccionData?.ciudad || '',
                     direccion_cp: direccionData?.codigo_postal || '',
-                    direccion_pais: direccionData?.pais || '',
-                    // 🎁 NUEVO: Datos de regalo
                     gift_active: req.body.gift?.active ? 'true' : 'false',
                     gift_message: req.body.gift?.message || '',
-                    gift_cost: req.body.gift?.active ? '2.00' : '0'
-                },
+                    gift_cost: req.body.gift?.active ? '2.00' : '0',
+                    es_recogida_tienda: esRecogidaTienda ? 'true' : 'false'
+                }
             };
+
+            // 🔥 CONDICIONAL FUERA del objeto (después de cerrar sessionParams)
+            if (!esRecogidaTienda) {
+                sessionParams.shipping_address_collection = { allowed_countries: ['ES'] };
+            }
 
             const session = await stripe.checkout.sessions.create(sessionParams);
             console.log('✅ [CHECKOUT] Sesión de Stripe creada:', session.id);
@@ -2037,6 +2043,7 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
                 p.imagen,
                 oi.cantidad,
                 oi.precio
+                oi.talla
              FROM order_items oi
              JOIN productos p ON oi.producto_id = p.id
              WHERE oi.pedido_id = $1`,
