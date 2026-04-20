@@ -1618,6 +1618,9 @@ app.post('/api/create-checkout-session',
     async (req, res) => {
         console.log('💳 [CHECKOUT] Ruta llamada');
 
+        // 🔥 LOG PARA VER QUÉ RECIBE EL SERVIDOR
+        console.log('📦 Body completo recibido:', JSON.stringify(req.body, null, 2));
+        console.log('🔍 esRecogidaTienda en body:', req.body.esRecogidaTienda);
         const errors = validationResult(req);
         if (!errors.isEmpty()) {
             console.log('❌ [CHECKOUT] Errores de validación:', errors.array());
@@ -1640,6 +1643,25 @@ app.post('/api/create-checkout-session',
             let direccionEnvio = null;
             let direccionDetalles = null;
 
+            // 🔥 LOG PARA DEPURAR
+            console.log('📍 direccionData recibido:', direccionData);
+
+            // 🔥 NUEVO: Verificar si es recogida en tienda ANTES
+            const esRecogidaTienda = req.body.esRecogidaTienda === true;
+
+            // 🔥 Si es recogida en tienda y no hay dirección, crear una por defecto
+            if (!direccionData && esRecogidaTienda) {
+                console.log('⚠️ direccionData vacío, creando dirección por defecto para recogida');
+                direccionData = {
+                    nombre: 'Cliente',
+                    calle: 'Recoger en tienda',
+                    piso: '',
+                    ciudad: 'Salamanca',
+                    codigo_postal: '37001',
+                    pais: 'ES'
+                };
+            }
+
             if (direccionData) {
                 const partesDireccion = [
                     direccionData.calle || '',
@@ -1649,7 +1671,7 @@ app.post('/api/create-checkout-session',
                     direccionData.pais || ''
                 ].filter(Boolean);
 
-                direccionEnvio = partesDireccion.join(', ');
+                direccionEnvio = esRecogidaTienda ? 'Recoger en tienda' : partesDireccion.join(', ');
                 direccionDetalles = JSON.stringify(direccionData);
                 console.log('📍 [CHECKOUT] Dirección:', direccionEnvio);
             }
@@ -1841,10 +1863,22 @@ app.post('/api/create-checkout-session',
                 sessionParams.shipping_address_collection = { allowed_countries: ['ES'] };
             }
 
-            const session = await stripe.checkout.sessions.create(sessionParams);
-            console.log('✅ [CHECKOUT] Sesión de Stripe creada:', session.id);
-
-            res.json({ id: session.id, url: session.url });
+            try {
+                console.log('🔄 Creando sesión de Stripe...');
+                const session = await stripe.checkout.sessions.create(sessionParams);
+                console.log('✅ Sesión de Stripe creada:', session.id);
+                res.json({ id: session.id, url: session.url });
+            } catch (stripeError) {
+                console.error('❌ ERROR DE STRIPE:');
+                console.error('   Mensaje:', stripeError.message);
+                console.error('   Tipo:', stripeError.type);
+                console.error('   Código:', stripeError.code);
+                console.error('   Parámetros:', stripeError.param);
+                res.status(500).json({
+                    message: 'Error de Stripe: ' + stripeError.message,
+                    type: stripeError.type
+                });
+            }
 
         } catch (err) {
             console.error('❌ [CHECKOUT] Error:', err);
