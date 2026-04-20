@@ -1689,7 +1689,14 @@ app.post('/api/create-checkout-session',
                 subtotal += precio * cantidad;
             });
 
-            const shipping = subtotal > 50 ? 0 : 4.99;
+            // 🔥 NUEVO: Verificar si es recogida en tienda ANTES de calcular envío
+            console.log('🔥 esRecogidaTienda:', esRecogidaTienda);
+
+            // 🔥 El envío es 0 si es recogida en tienda
+            let shipping = 0;
+            if (!esRecogidaTienda) {
+                shipping = subtotal > 50 ? 0 : 4.99;
+            }
             console.log(`💰 [CHECKOUT] Subtotal: ${subtotal.toFixed(2)}€, Envío: ${shipping.toFixed(2)}€`);
 
             // ===== NUEVO: Cálculo mejorado de descuentos =====
@@ -1785,10 +1792,7 @@ app.post('/api/create-checkout-session',
                 quantity: Math.min(parseInt(item.cantidad) || 1, 99),
             }));
 
-            // 🔥 NUEVO: Verificar si es recogida en tienda (NO cobrar envío)
-            const esRecogidaTienda = req.body.esRecogidaTienda === true;
-
-            //añadir gastos de envío SOLO si NO es recogida en tienda
+            // 🔥 AQUÍ DEBE IR EL CÓDIGO - DESPUÉS de lineItems y ANTES de sessionParams
             if (!esRecogidaTienda && shipping > 0) {
                 lineItems.push({
                     price_data: {
@@ -2042,7 +2046,7 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
                 p.nombre,
                 p.imagen,
                 oi.cantidad,
-                oi.precio
+                oi.precio,
                 oi.talla
              FROM order_items oi
              JOIN productos p ON oi.producto_id = p.id
@@ -2641,4 +2645,3 @@ console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
     console.log(`✅ Servidor corriendo en puerto ${PORT}`)
 );
-//ado esto para el commit
