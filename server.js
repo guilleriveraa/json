@@ -268,6 +268,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                         console.log('⚠️ No hay items para guardar');
                     }
 
+                    // Después de guardar los items y antes de vaciar el carrito
+                    console.log(`🎉 Pedido creado ID: ${pedidoId}`);
+
+                    // 🔥 ENVIAR EMAIL
+                    await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
+
                     // 5. Actualizar cupón
                     if (cuponId) {
                         console.log('🎫 Actualizando cupón...');
@@ -710,7 +716,181 @@ async function enviarEmailRecuperacion(email, resetLink) {
         console.error('❌ Error enviando email de recuperación con Resend:', err);
     }
 }
+// ===================== FUNCIÓN PARA ENVIAR EMAIL DE PEDIDO =====================
+async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
+    try {
+        console.log(`📧 Enviando email de pedido #${pedidoId}...`);
 
+        // 1. Obtener datos del usuario
+        const { rows: usuarios } = await db.query(
+            'SELECT nombre, email FROM usuarios WHERE id = $1',
+            [usuarioId]
+        );
+
+        if (usuarios.length === 0) {
+            console.error('❌ Usuario no encontrado');
+            return;
+        }
+
+        const usuario = usuarios[0];
+
+        // 2. Construir HTML de los items del pedido
+        let itemsHTML = '';
+        let subtotal = 0;
+
+        for (const item of items) {
+            const precio = parseFloat(item.precio);
+            const subtotalItem = precio * item.cantidad;
+            subtotal += subtotalItem;
+
+            itemsHTML += `
+                <tr style="border-bottom: 1px solid #ddd;">
+                    <td style="padding: 12px; text-align: left;">${item.nombre_producto || item.nombre} ${item.talla ? `<br><small style="color:#e83083;">Talla: ${item.talla}</small>` : ''}</td>
+                    <td style="padding: 12px; text-align: center;">${item.cantidad}</td>
+                    <td style="padding: 12px; text-align: right;">${precio.toFixed(2)}€</td>
+                    <td style="padding: 12px; text-align: right;">${subtotalItem.toFixed(2)}€</td>
+                </tr>
+            `;
+        }
+
+        // 3. Enviar email al cliente
+        const clienteHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; background-color: #f4f4f4; padding: 20px; }
+                    .container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1); }
+                    .header { background: linear-gradient(135deg, #c62828 0%, #8e0000 100%); color: white; padding: 30px 25px; text-align: center; }
+                    .header h1 { margin: 0; font-size: 28px; }
+                    .content { padding: 30px 25px; }
+                    .pedido-info { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+                    .pedido-info p { margin: 5px 0; }
+                    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+                    th { background: #f8f9fa; padding: 12px; text-align: left; border-bottom: 2px solid #c62828; }
+                    .total-row { font-weight: bold; font-size: 1.2rem; border-top: 2px solid #ddd; }
+                    .footer { background: #f8f9fa; padding: 25px; text-align: center; border-top: 1px solid #e0e0e0; font-size: 14px; color: #666; }
+                    .btn { display: inline-block; background: #c62828; color: white; text-decoration: none; padding: 12px 30px; border-radius: 50px; font-weight: bold; margin: 20px 0; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>¡Gracias por tu compra! 🎉</h1>
+                    </div>
+                    <div class="content">
+                        <h2>Hola ${usuario.nombre},</h2>
+                        <p>Hemos recibido tu pedido correctamente. Aquí tienes los detalles:</p>
+                        
+                        <div class="pedido-info">
+                            <p><strong>📦 Número de pedido:</strong> #${pedidoId}</p>
+                            <p><strong>📅 Fecha:</strong> ${new Date().toLocaleString('es-ES')}</p>
+                            <p><strong>📍 Dirección de envío:</strong> ${direccion || 'Recoger en tienda'}</p>
+                        </div>
+                        
+                        <h3>🛒 Detalle del pedido</h3>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Producto</th>
+                                    <th>Cantidad</th>
+                                    <th>Precio</th>
+                                    <th>Subtotal</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${itemsHTML}
+                            </tbody>
+                            <tfoot>
+                                <tr class="total-row">
+                                    <td colspan="3" style="text-align: right; padding: 12px;"><strong>TOTAL</strong></td>
+                                    <td style="padding: 12px; text-align: right;"><strong>${parseFloat(total).toFixed(2)}€</strong></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                        
+                        <p>Tu pedido será procesado en las próximas 24-48 horas.</p>
+                        <p>¡Gracias por confiar en SalamancaVivela!</p>
+                        
+                        <div style="text-align: center;">
+                            <a href="${process.env.BASE_URL}/pedidos.html" class="btn">Ver mis pedidos</a>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>&copy; ${new Date().getFullYear()} SalamancaVivela. Todos los derechos reservados.</p>
+                        <p><small>Calle Azafranal 26, Salamanca</small></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+
+        // 4. Enviar email al cliente
+        const { data: clienteData, error: clienteError } = await resend.emails.send({
+            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
+            to: [usuario.email],
+            subject: `✅ Pedido #${pedidoId} confirmado - SalamancaVivela`,
+            html: clienteHtml
+        });
+
+        if (clienteError) {
+            console.error('❌ Error enviando email al cliente:', clienteError);
+        } else {
+            console.log('✅ Email enviado al cliente:', usuario.email);
+        }
+
+        // 5. Enviar email al administrador
+        const adminHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>Nuevo pedido #${pedidoId}</title>
+            </head>
+            <body style="font-family: Arial, sans-serif;">
+                <h2>🛒 NUEVO PEDIDO #${pedidoId}</h2>
+                <p><strong>Cliente:</strong> ${usuario.nombre} (${usuario.email})</p>
+                <p><strong>Total:</strong> ${parseFloat(total).toFixed(2)}€</p>
+                <p><strong>Dirección:</strong> ${direccion || 'Recoger en tienda'}</p>
+                <h3>Productos:</h3>
+                <table border="1" cellpadding="8" style="border-collapse: collapse;">
+                    <tr style="background:#f2f2f2;">
+                        <th>Producto</th>
+                        <th>Cantidad</th>
+                        <th>Precio</th>
+                        <th>Subtotal</th>
+                    </tr>
+                    ${itemsHTML}
+                    <tr style="font-weight: bold; background:#f9f9f9;">
+                        <td colspan="3" style="text-align: right;">TOTAL</td>
+                        <td>${parseFloat(total).toFixed(2)}€</td>
+                    </tr>
+                </table>
+                <hr>
+                <p><a href="${process.env.BASE_URL}/admin/pedidos.html">Ver en el panel de administración</a></p>
+            </body>
+            </html>
+        `;
+
+        const { error: adminError } = await resend.emails.send({
+            from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
+            to: [process.env.ADMIN_EMAIL || 'salamancavivela@gmail.com'],
+            subject: `🛒 Nuevo pedido #${pedidoId} - ${usuario.nombre}`,
+            html: adminHtml
+        });
+
+        if (adminError) {
+            console.error('❌ Error enviando email al admin:', adminError);
+        } else {
+            console.log('✅ Email enviado al administrador');
+        }
+
+    } catch (err) {
+        console.error('❌ Error en enviarEmailPedido:', err);
+    }
+}
 // ===================== RECUPERACIÓN SIN EMAIL (PREGUNTAS DE SEGURIDAD) =====================
 console.log('🔐 Configurando rutas de recuperación con preguntas...');
 
@@ -2165,6 +2345,9 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         }
 
         console.log(`✅ Pedido de recogida creado ID: ${pedidoId} - Código: ${codigoRecogida}`);
+
+        console.log(`🎉 Pedido creado ID: ${pedidoId}`);
+        await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
 
         res.json({
             message: 'Pedido de recogida creado correctamente',
