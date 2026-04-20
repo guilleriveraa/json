@@ -2343,7 +2343,7 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         console.log('✅ Items guardados');
 
         // 🔥 ENVIAR EMAIL (si tienes la función)
-        // await enviarEmailPedido(pedidoId, usuarioId, subtotal, items, 'Recoger en tienda');
+        await enviarEmailPedido(pedidoId, usuarioId, subtotal, items, 'Recoger en tienda');
 
         console.log(`✅ Pedido de recogida creado ID: ${pedidoId}`);
         res.json({
