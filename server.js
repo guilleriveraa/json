@@ -717,9 +717,11 @@ async function enviarEmailRecuperacion(email, resetLink) {
     }
 }
 // ===================== FUNCIÓN PARA ENVIAR EMAIL DE PEDIDO =====================
+// ===================== FUNCIÓN PARA ENVIAR EMAIL DE PEDIDO (VERSIÓN CORREGIDA) =====================
 async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
     try {
         console.log(`📧 Enviando email de pedido #${pedidoId}...`);
+        console.log('📦 Items recibidos:', JSON.stringify(items, null, 2));
 
         // 1. Obtener datos del usuario
         const { rows: usuarios } = await db.query(
@@ -734,24 +736,44 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
 
         const usuario = usuarios[0];
 
-        // 2. Construir HTML de los items del pedido
+        // 2. Construir HTML de los items del pedido (manejando diferentes estructuras)
         let itemsHTML = '';
         let subtotal = 0;
 
         for (const item of items) {
-            const precio = parseFloat(item.precio);
-            const subtotalItem = precio * item.cantidad;
+            // 🔥 Obtener valores independientemente de la estructura
+            const nombre = item.nombre_producto || item.nombre || `Producto #${item.producto_id || item.id}`;
+            const cantidad = item.cantidad || item.quantity || 1;
+            const precio = parseFloat(item.precio || item.price || 0);
+            const talla = item.talla || null;
+
+            const subtotalItem = precio * cantidad;
             subtotal += subtotalItem;
 
             itemsHTML += `
                 <tr style="border-bottom: 1px solid #ddd;">
-                    <td style="padding: 12px; text-align: left;">${item.nombre_producto || item.nombre} ${item.talla ? `<br><small style="color:#e83083;">Talla: ${item.talla}</small>` : ''}</td>
-                    <td style="padding: 12px; text-align: center;">${item.cantidad}</td>
+                    <td style="padding: 12px; text-align: left;">
+                        ${nombre}
+                        ${talla ? `<br><small style="color:#e83083;">Talla: ${talla}</small>` : ''}
+                    </td>
+                    <td style="padding: 12px; text-align: center;">${cantidad}</td>
                     <td style="padding: 12px; text-align: right;">${precio.toFixed(2)}€</td>
                     <td style="padding: 12px; text-align: right;">${subtotalItem.toFixed(2)}€</td>
                 </tr>
             `;
         }
+
+        // Si no hay items, mostrar mensaje
+        if (itemsHTML === '') {
+            itemsHTML = `
+                <tr>
+                    <td colspan="4" style="padding: 12px; text-align: center;">No hay productos</td>
+                </tr>
+            `;
+        }
+
+        // Usar el total pasado o calcularlo
+        const totalFinal = parseFloat(total) || subtotal;
 
         // 3. Enviar email al cliente
         const clienteHtml = `
@@ -787,17 +809,17 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
                         <div class="pedido-info">
                             <p><strong>📦 Número de pedido:</strong> #${pedidoId}</p>
                             <p><strong>📅 Fecha:</strong> ${new Date().toLocaleString('es-ES')}</p>
-                            <p><strong>📍 Dirección de envío:</strong> ${direccion || 'Recoger en tienda'}</p>
+                            <p><strong>📍 Dirección:</strong> ${direccion || 'Recoger en tienda'}</p>
                         </div>
                         
                         <h3>🛒 Detalle del pedido</h3>
-                        <table>
+                        <table style="width: 100%; border-collapse: collapse;">
                             <thead>
-                                <tr>
-                                    <th>Producto</th>
-                                    <th>Cantidad</th>
-                                    <th>Precio</th>
-                                    <th>Subtotal</th>
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; text-align: left;">Producto</th>
+                                    <th style="padding: 12px; text-align: center;">Cantidad</th>
+                                    <th style="padding: 12px; text-align: right;">Precio</th>
+                                    <th style="padding: 12px; text-align: right;">Subtotal</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -806,7 +828,7 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
                             <tfoot>
                                 <tr class="total-row">
                                     <td colspan="3" style="text-align: right; padding: 12px;"><strong>TOTAL</strong></td>
-                                    <td style="padding: 12px; text-align: right;"><strong>${parseFloat(total).toFixed(2)}€</strong></td>
+                                    <td style="padding: 12px; text-align: right;"><strong>${totalFinal.toFixed(2)}€</strong></td>
                                 </tr>
                             </tfoot>
                         </table>
@@ -828,7 +850,7 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
         `;
 
         // 4. Enviar email al cliente
-        const { data: clienteData, error: clienteError } = await resend.emails.send({
+        const { error: clienteError } = await resend.emails.send({
             from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
             to: [usuario.email],
             subject: `✅ Pedido #${pedidoId} confirmado - SalamancaVivela`,
@@ -852,7 +874,7 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
             <body style="font-family: Arial, sans-serif;">
                 <h2>🛒 NUEVO PEDIDO #${pedidoId}</h2>
                 <p><strong>Cliente:</strong> ${usuario.nombre} (${usuario.email})</p>
-                <p><strong>Total:</strong> ${parseFloat(total).toFixed(2)}€</p>
+                <p><strong>Total:</strong> ${totalFinal.toFixed(2)}€</p>
                 <p><strong>Dirección:</strong> ${direccion || 'Recoger en tienda'}</p>
                 <h3>Productos:</h3>
                 <table border="1" cellpadding="8" style="border-collapse: collapse;">
@@ -865,7 +887,7 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
                     ${itemsHTML}
                     <tr style="font-weight: bold; background:#f9f9f9;">
                         <td colspan="3" style="text-align: right;">TOTAL</td>
-                        <td>${parseFloat(total).toFixed(2)}€</td>
+                        <td>${totalFinal.toFixed(2)}€</td>
                     </tr>
                 </table>
                 <hr>
