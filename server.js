@@ -241,10 +241,10 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
                     // 3. OBTENER ITEMS DEL CARRITO
                     const { rows: items } = await db.query(
-                        `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
-             FROM cart_items ci
-             JOIN productos p ON ci.producto_id = p.id
-             WHERE ci.carrito_id = $1`,
+                        `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla, ci.color
+                         FROM cart_items ci
+                         JOIN productos p ON ci.producto_id = p.id
+                         WHERE ci.carrito_id = $1`,
                         [carritoId]
                     );
                     console.log(`📦 Items encontrados en carrito: ${items.length}`);
@@ -254,13 +254,12 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                         console.log('💾 Guardando items en order_items...');
                         for (const item of items) {
                             console.log(`   → Insertando: ${item.nombre}, cantidad: ${item.cantidad}, talla: ${item.talla || 'N/A'}`);
-
                             await db.query(
                                 `INSERT INTO order_items 
-                 (pedido_id, producto_id, cantidad, precio, talla, nombre_producto, imagen_producto) 
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+                                    (pedido_id, producto_id, cantidad, precio, talla, color, nombre_producto, imagen_producto) 
+                                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
                                 [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario),
-                                    item.talla || null, item.nombre, item.imagen]
+                                    item.talla || null, item.color || null, item.nombre, item.imagen]
                             );
                         }
                         console.log(`✅ ${items.length} items guardados correctamente`);
@@ -717,7 +716,6 @@ async function enviarEmailRecuperacion(email, resetLink) {
     }
 }
 // ===================== FUNCIÓN PARA ENVIAR EMAIL DE PEDIDO =====================
-// ===================== FUNCIÓN PARA ENVIAR EMAIL DE PEDIDO (VERSIÓN CORREGIDA) =====================
 async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
     try {
         console.log(`📧 Enviando email de pedido #${pedidoId}...`);
@@ -1271,7 +1269,7 @@ app.get('/api/cart', async (req, res) => {
 
         // 🔥🔥🔥 CAMBIO CRÍTICO: Añadir ci.talla al SELECT
         const { rows: items } = await db.query(
-            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla
+            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla, ci.color
              FROM cart_items ci
              JOIN productos p ON ci.producto_id = p.id
              WHERE ci.carrito_id = $1`,
@@ -1290,7 +1288,8 @@ app.get('/api/cart', async (req, res) => {
                 price: precio,
                 quantity: item.cantidad,
                 image: item.imagen || '',
-                talla: item.talla  // ← AHORA SÍ INCLUIMOS LA TALLA
+                talla: item.talla,  // ← AHORA SÍ INCLUIMOS LA TALLA
+                color: item.color
             };
         });
 
@@ -1323,7 +1322,7 @@ app.post('/api/cart/add', async (req, res) => {
 
     const token = authHeader.split(' ')[1];
     // 🆕 NUEVO: Aceptar talla
-    const { productId, quantity = 1, talla } = req.body;
+    const { productId, quantity = 1, talla, color } = req.body;
     console.log(`➕ [CART ADD] Producto: ${productId}, Cantidad: ${quantity}, Talla: ${talla || 'No'}`);
 
     try {
@@ -1379,8 +1378,8 @@ app.post('/api/cart/add', async (req, res) => {
             console.log(`📦 [CART ADD] Añadiendo nuevo producto al carrito`);
             // 🆕 NUEVO: Guardar talla
             await db.query(
-                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario, talla) VALUES ($1, $2, $3, $4, $5)',
-                [carritoId, productId, quantity, product[0].precio, talla]
+                'INSERT INTO cart_items (carrito_id, producto_id, cantidad, precio_unitario, talla, color) VALUES ($1, $2, $3, $4, $5, $6)',
+                [carritoId, productId, quantity, product[0].precio, talla, color]
             );
         }
 
@@ -2277,16 +2276,17 @@ app.get('/api/orders/:orderId/items', async (req, res) => {
 
         const { rows: items } = await db.query(
             `SELECT 
-                oi.id,
-                oi.producto_id,
-                p.nombre,
-                p.imagen,
-                oi.cantidad,
-                oi.precio,
-                oi.talla
-             FROM order_items oi
-             JOIN productos p ON oi.producto_id = p.id
-             WHERE oi.pedido_id = $1`,
+        oi.id,
+        oi.producto_id,
+        p.nombre,
+        p.imagen,
+        oi.cantidad,
+        oi.precio,
+        oi.talla,
+        oi.color
+     FROM order_items oi
+     JOIN productos p ON oi.producto_id = p.id
+     WHERE oi.pedido_id = $1`,
             [orderId]
         );
 
@@ -2358,8 +2358,8 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         for (const item of items) {
             console.log(`   → Item: id=${item.id}, quantity=${item.quantity}, price=${item.price}, talla=${item.talla}`);
             await db.query(
-                'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla) VALUES ($1, $2, $3, $4, $5)',
-                [pedidoId, item.id, item.quantity, item.price, item.talla || null]
+                'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla, color) VALUES ($1, $2, $3, $4, $5, $6)',
+                [pedidoId, item.id, item.quantity, item.price, item.talla || null, item.color || null]
             );
         }
         console.log('✅ Items guardados');
