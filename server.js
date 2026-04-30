@@ -2881,6 +2881,39 @@ app.post('/api/emergency-clear-cart', async (req, res) => {
     }
 });
 
+// ===== VACIAR CARRITO =====
+app.post('/api/cart/clear', async (req, res) => {
+    console.log('🗑️ [CLEAR CART] Ruta llamada');
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const usuarioId = decoded.userId;
+
+        // Buscar carrito activo del usuario
+        const { rows: carrito } = await db.query(
+            'SELECT id FROM carritos WHERE usuario_id = $1 ORDER BY fecha_creacion DESC LIMIT 1',
+            [usuarioId]
+        );
+
+        if (carrito.length > 0) {
+            // Eliminar items del carrito
+            await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carrito[0].id]);
+            console.log(`✅ Carrito vaciado para usuario ${usuarioId}`);
+        }
+
+        res.json({ message: 'Carrito vaciado correctamente' });
+    } catch (err) {
+        console.error('❌ Error vaciando carrito:', err);
+        res.status(500).json({ message: 'Error vaciando carrito' });
+    }
+});
+
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
