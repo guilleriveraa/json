@@ -224,11 +224,11 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                 console.log(`🎉 Pedido nuevo creado ID: ${pedidoId}`);
             }
 
-            // 🔥🔥🔥 CAMBIO 2: Verificar que carritoId existe
+            // Verificar que carritoId existe
             if (!carritoId) {
                 console.error('❌ ERROR CRÍTICO: carritoId es null o undefined');
             } else {
-                // 🔥🔥🔥 CAMBIO 3: Verificar que el carrito existe en la BD
+                // Verificar que el carrito existe en la BD
                 const { rows: carritoExists } = await db.query(
                     'SELECT id FROM carritos WHERE id = $1',
                     [carritoId]
@@ -253,7 +253,6 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                     if (items.length > 0) {
                         console.log('💾 Guardando items en order_items...');
                         for (const item of items) {
-                            console.log(`   → Insertando: ${item.nombre}, cantidad: ${item.cantidad}, talla: ${item.talla || 'N/A'}`);
                             await db.query(
                                 `INSERT INTO order_items 
                                     (pedido_id, producto_id, cantidad, precio, talla, color, nombre_producto, imagen_producto) 
@@ -263,15 +262,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
                             );
                         }
                         console.log(`✅ ${items.length} items guardados correctamente`);
-                    } else {
-                        console.log('⚠️ No hay items para guardar');
                     }
-
-                    // Después de guardar los items y antes de vaciar el carrito
-                    console.log(`🎉 Pedido creado ID: ${pedidoId}`);
-
-                    // 🔥 ENVIAR EMAIL
-                    await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
 
                     // 5. Actualizar cupón
                     if (cuponId) {
@@ -285,11 +276,15 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
 
                     // 6. Vaciar carrito
                     console.log('🧹 Vaciando carrito...');
-                    const deleteResult = await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
-                    console.log(`✅ Carrito vaciado. Filas eliminadas: ${deleteResult.rowCount}`);
+                    await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+                    console.log(`✅ Carrito vaciado`);
+
+                    // 7. ENVIAR EMAIL EN SEGUNDO PLANO (no bloquear)
+                    enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio).catch(e => {
+                        console.error('❌ Error enviando email (no crítico):', e);
+                    });
                 }
             }
-
         } catch (err) {
             console.error('❌ Error en webhook:', err);
             console.error('Stack:', err.stack);
@@ -2356,7 +2351,6 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         // Guardar items del pedido
         console.log('💾 Guardando items...');
         for (const item of items) {
-            console.log(`   → Item: id=${item.id}, quantity=${item.quantity}, price=${item.price}, talla=${item.talla}`);
             await db.query(
                 'INSERT INTO order_items (pedido_id, producto_id, cantidad, precio, talla, color) VALUES ($1, $2, $3, $4, $5, $6)',
                 [pedidoId, item.id, item.quantity, item.price, item.talla || null, item.color || null]
@@ -2364,14 +2358,16 @@ app.post('/api/pedidos/recogida-tienda', async (req, res) => {
         }
         console.log('✅ Items guardados');
 
-        // 🔥 ENVIAR EMAIL (si tienes la función)
-        await enviarEmailPedido(pedidoId, usuarioId, subtotal, items, 'Recoger en tienda');
-
-        console.log(`✅ Pedido de recogida creado ID: ${pedidoId}`);
+        // ✅ 1. RESPONDER PRIMERO (el pedido ya está guardado)
         res.json({
             message: 'Pedido de recogida creado correctamente',
             pedidoId: pedidoId,
             codigoRecogida: codigoRecogida
+        });
+
+        // ✅ 2. ENVIAR EMAIL EN SEGUNDO PLANO (no bloquear)
+        enviarEmailPedido(pedidoId, usuarioId, subtotal, items, 'Recoger en tienda').catch(e => {
+            console.error('❌ Error enviando email (no crítico):', e);
         });
 
     } catch (err) {
