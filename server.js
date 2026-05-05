@@ -2910,6 +2910,67 @@ app.post('/api/cart/clear', async (req, res) => {
     }
 });
 
+// ===== ENVIAR EMAIL DE CONFIRMACIÓN POST-PAGO =====
+app.post('/api/pedidos/enviar-email-post-pago', async (req, res) => {
+    console.log('📧 [EMAIL POST-PAGO] Ruta llamada');
+
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        return res.status(401).json({ message: 'No autorizado' });
+    }
+
+    try {
+        const token = authHeader.split(' ')[1];
+        const decoded = jwt.verify(token, JWT_SECRET);
+        const usuarioId = decoded.userId;
+
+        const { sessionId } = req.body;
+
+        if (!sessionId) {
+            return res.status(400).json({ message: 'sessionId requerido' });
+        }
+
+        console.log('🔍 Buscando pedido con stripe_session_id:', sessionId);
+
+        // Buscar el pedido por stripe_session_id
+        const { rows: pedidos } = await db.query(
+            `SELECT p.*, u.nombre as usuario_nombre, u.email as usuario_email
+             FROM pedidos p
+             JOIN usuarios u ON p.usuario_id = u.id
+             WHERE p.stripe_session_id = $1 AND p.usuario_id = $2`,
+            [sessionId, usuarioId]
+        );
+
+        if (pedidos.length === 0) {
+            console.log('⚠️ Pedido no encontrado, puede que el webhook aún no lo haya procesado');
+            return res.status(404).json({ message: 'Pedido no encontrado' });
+        }
+
+        const pedido = pedidos[0];
+
+        // Obtener items del pedido
+        const { rows: items } = await db.query(
+            `SELECT oi.*, p.nombre as producto_nombre
+             FROM order_items oi
+             JOIN productos p ON oi.producto_id = p.id
+             WHERE oi.pedido_id = $1`,
+            [pedido.id]
+        );
+
+        console.log(`📧 Enviando email de confirmación (post-pago) para pedido #${pedido.id}`);
+
+        // Enviar email
+        await enviarEmailPedido(pedido.id, pedido.usuario_id, pedido.total, items, pedido.direccion_envio);
+
+        console.log(`✅ Email post-pago enviado para pedido #${pedido.id}`);
+        res.json({ success: true, message: 'Email enviado correctamente' });
+
+    } catch (err) {
+        console.error('❌ Error:', err);
+        res.status(500).json({ message: 'Error al enviar email' });
+    }
+});
+
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
