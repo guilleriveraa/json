@@ -891,7 +891,7 @@ async function enviarEmailPedido(pedidoId, usuarioId, total, items, direccion) {
 
         const { error: adminError } = await resend.emails.send({
             from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
-            to: [process.env.ADMIN_EMAIL || 'salamancavivela@gmail.com'],
+            to: [process.env.ADMIN_EMAIL || 'latiendasalamancavivela@gmail.com'],
             subject: `🛒 Nuevo pedido #${pedidoId} - ${usuario.nombre}`,
             html: adminHtml
         });
@@ -1182,7 +1182,7 @@ async function enviarEmailEnSegundoPlano(name, email, subject, message) {
 
         const { data, error } = await resend.emails.send({
             from: 'SalamancaVivela <no-reply@latiendasalamancavivela.com>',
-            to: [process.env.ADMIN_EMAIL || 'salamancavivela@gmail.com'],
+            to: [process.env.ADMIN_EMAIL || 'latiendasalamancavivela@gmail.com'],
             subject: `📬 Mensaje de contacto: ${subject || 'Sin asunto'}`,
             html: `
                 <h2>Nuevo mensaje de contacto</h2>
