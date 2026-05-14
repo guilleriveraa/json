@@ -3084,6 +3084,38 @@ app.post('/api/test-webhook', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// ===== RUTA DE PRUEBA SOLO PARA EMAIL =====
+app.post('/api/test-email-only', async (req, res) => {
+    console.log('📧 Probando envío de email');
+
+    // Obtener un usuario real de la BD
+    const { rows: usuarios } = await db.query(
+        'SELECT id, nombre, email FROM usuarios LIMIT 1'
+    );
+
+    if (usuarios.length === 0) {
+        return res.status(404).json({ error: 'No hay usuarios en la BD' });
+    }
+
+    const usuario = usuarios[0];
+
+    const testItems = [{
+        nombre_producto: 'Producto de prueba',
+        cantidad: 1,
+        precio: 10,
+        talla: null,
+        color: 'rojo'
+    }];
+
+    try {
+        console.log(`📧 Enviando email de prueba a: ${usuario.email}`);
+        await enviarEmailPedido(999, usuario.id, 10, testItems, 'Calle Test 123');
+        res.json({ success: true, message: `Email enviado a ${usuario.email}` });
+    } catch (err) {
+        console.error('Error:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
