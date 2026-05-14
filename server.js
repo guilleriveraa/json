@@ -2980,7 +2980,7 @@ app.post('/api/test-webhook', async (req, res) => {
         id: 'cs_test_' + Date.now(),
         metadata: {
             usuarioId: '1',  // ← CAMBIA por un ID de usuario real que tenga email
-            carritoId: '11',  // ← CAMBIA por un carrito real con items
+            carritoId: '1',  // ← CAMBIA por un carrito real con items
             total: '29.99',
             descuento: '0',
             cuponId: '',
