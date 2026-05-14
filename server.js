@@ -2971,39 +2971,34 @@ app.post('/api/pedidos/enviar-email-post-pago', async (req, res) => {
     }
 });
 
-// 🔥 RUTA DE PRUEBA - Simular webhook de Stripe (ELIMINAR DESPUÉS)
-app.post('/api/test-webhook', async (req, res) => {
-    console.log('🧪 TEST WEBHOOK - Simulando pago de Stripe');
+// Ruta de prueba para simular webhook (ELIMINAR DESPUÉS DE PROBAR)
+app.post('/api/test-stripe-webhook', async (req, res) => {
+    console.log('🧪 Simulando webhook de Stripe');
 
-    // Datos simulados de un pago exitoso (usa valores reales de tu BD)
+    // Simular un evento checkout.session.completed
     const mockSession = {
         id: 'cs_test_' + Date.now(),
         metadata: {
-            usuarioId: '1',  // ← CAMBIA por un ID de usuario real que tenga email
-            carritoId: '1',  // ← CAMBIA por un carrito real con items
+            usuarioId: '1',  // ← Cambia por un ID de usuario real
+            carritoId: '1',  // ← Cambia por un carrito real con items
             total: '29.99',
             descuento: '0',
-            cuponId: '',
             direccion_nombre: 'Cliente Test',
             direccion_calle: 'Calle Test 123',
-            direccion_piso: '1º A',
             direccion_ciudad: 'Salamanca',
             direccion_cp: '37001',
-            direccion_pais: 'ES',
             gift_active: 'false',
-            gift_message: '',
-            gift_cost: '0',
             es_recogida_tienda: 'false'
         }
     };
 
     try {
-        // Obtener el carrito
-        const carritoId = mockSession.metadata.carritoId;
+        // Llamar directamente a la lógica del webhook
         const usuarioId = mockSession.metadata.usuarioId;
+        const carritoId = mockSession.metadata.carritoId;
         const total = parseFloat(mockSession.metadata.total);
 
-        // Verificar que el carrito existe
+        // Verificar carrito
         const { rows: carritoExists } = await db.query(
             'SELECT id FROM carritos WHERE id = $1',
             [carritoId]
@@ -3013,7 +3008,7 @@ app.post('/api/test-webhook', async (req, res) => {
             return res.status(404).json({ error: 'Carrito no encontrado' });
         }
 
-        // Obtener items del carrito
+        // Obtener items
         const { rows: items } = await db.query(
             `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla, ci.color
              FROM cart_items ci
@@ -3022,33 +3017,19 @@ app.post('/api/test-webhook', async (req, res) => {
             [carritoId]
         );
 
-        if (items.length === 0) {
-            return res.status(400).json({ error: 'Carrito vacío' });
-        }
-
-        // Insertar pedido
-        const direccionEnvio = `${mockSession.metadata.direccion_calle}, ${mockSession.metadata.direccion_piso}, ${mockSession.metadata.direccion_ciudad}, ${mockSession.metadata.direccion_cp}`;
-        const direccionDetalles = JSON.stringify({
-            nombre: mockSession.metadata.direccion_nombre,
-            calle: mockSession.metadata.direccion_calle,
-            piso: mockSession.metadata.direccion_piso,
-            ciudad: mockSession.metadata.direccion_ciudad,
-            codigo_postal: mockSession.metadata.direccion_cp,
-            pais: mockSession.metadata.direccion_pais
-        });
+        // Crear pedido
+        const direccionEnvio = `${mockSession.metadata.direccion_calle}, ${mockSession.metadata.direccion_ciudad}, ${mockSession.metadata.direccion_cp}`;
 
         const { rows: pedidoRows } = await db.query(
             `INSERT INTO pedidos 
-             (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
+             (usuario_id, total, estado, fecha, direccion_envio, cupon_id, descuento_aplicado, stripe_session_id,
               gift_active, gift_message, gift_cost, metodo_pago, estado_pago) 
-             VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'stripe', 'pagado') 
+             VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, 'stripe', 'pagado') 
              RETURNING id`,
-            [usuarioId, total, direccionEnvio, direccionDetalles, null, 0, mockSession.id,
-                false, '', 0]
+            [usuarioId, total, direccionEnvio, null, 0, mockSession.id, false, '', 0]
         );
 
         const pedidoId = pedidoRows[0].id;
-        console.log(`✅ Pedido de prueba creado ID: ${pedidoId}`);
 
         // Guardar items
         for (const item of items) {
@@ -3064,55 +3045,13 @@ app.post('/api/test-webhook', async (req, res) => {
         // Vaciar carrito
         await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
 
-        // 🔥 ENVIAR EMAIL CON LOGS DETALLADOS
-        console.log('📧 Intentando enviar email para pedido #' + pedidoId);
-        try {
-            await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
-            console.log('✅ Email enviado correctamente');
-        } catch (emailError) {
-            console.error('❌ Error específico al enviar email:', emailError);
-        }
+        // Enviar email
+        await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
 
-        res.json({
-            success: true,
-            pedidoId: pedidoId,
-            message: 'Pedido creado correctamente (simulado)'
-        });
+        res.json({ success: true, pedidoId });
 
     } catch (err) {
-        console.error('❌ Error en test webhook:', err);
-        res.status(500).json({ error: err.message });
-    }
-});
-// ===== RUTA DE PRUEBA SOLO PARA EMAIL =====
-app.post('/api/test-email-only', async (req, res) => {
-    console.log('📧 Probando envío de email');
-
-    // Obtener un usuario real de la BD
-    const { rows: usuarios } = await db.query(
-        'SELECT id, nombre, email FROM usuarios LIMIT 1'
-    );
-
-    if (usuarios.length === 0) {
-        return res.status(404).json({ error: 'No hay usuarios en la BD' });
-    }
-
-    const usuario = usuarios[0];
-
-    const testItems = [{
-        nombre_producto: 'Producto de prueba',
-        cantidad: 1,
-        precio: 10,
-        talla: null,
-        color: 'rojo'
-    }];
-
-    try {
-        console.log(`📧 Enviando email de prueba a: ${usuario.email}`);
-        await enviarEmailPedido(999, usuario.id, 10, testItems, 'Calle Test 123');
-        res.json({ success: true, message: `Email enviado a ${usuario.email}` });
-    } catch (err) {
-        console.error('Error:', err);
+        console.error('Error en test webhook:', err);
         res.status(500).json({ error: err.message });
     }
 });
