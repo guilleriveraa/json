@@ -2975,12 +2975,12 @@ app.post('/api/pedidos/enviar-email-post-pago', async (req, res) => {
 app.post('/api/test-webhook', async (req, res) => {
     console.log('🧪 TEST WEBHOOK - Simulando pago de Stripe');
 
-    // Datos simulados de un pago exitoso
+    // Datos simulados de un pago exitoso (usa valores reales de tu BD)
     const mockSession = {
         id: 'cs_test_' + Date.now(),
         metadata: {
-            usuarioId: '22',  // Cambia por un ID de usuario real
-            carritoId: '11',  // Cambia por un carrito real
+            usuarioId: '1',  // ← CAMBIA por un ID de usuario real que tenga email
+            carritoId: '11',  // ← CAMBIA por un carrito real con items
             total: '29.99',
             descuento: '0',
             cuponId: '',
@@ -3064,10 +3064,14 @@ app.post('/api/test-webhook', async (req, res) => {
         // Vaciar carrito
         await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
 
-        // Enviar email
-        enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio).catch(e => {
-            console.error('Error enviando email:', e);
-        });
+        // 🔥 ENVIAR EMAIL CON LOGS DETALLADOS
+        console.log('📧 Intentando enviar email para pedido #' + pedidoId);
+        try {
+            await enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio);
+            console.log('✅ Email enviado correctamente');
+        } catch (emailError) {
+            console.error('❌ Error específico al enviar email:', emailError);
+        }
 
         res.json({
             success: true,
