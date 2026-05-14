@@ -153,7 +153,7 @@ app.post('/webhook', express.raw({ type: 'application/json' }), async (req, res)
         console.log('✅ Webhook verificado. Tipo:', event.type);
     } catch (err) {
         console.log(`❌ Error de firma del webhook: ${err.message}`);
-        return res.status(400).send(`Webhook Error: ${err.message}`);
+        return res.status(400).json({ error: `Webhook Error: ${err.message}` });
     }
 
     if (event.type === 'checkout.session.completed') {
