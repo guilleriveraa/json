@@ -2971,6 +2971,115 @@ app.post('/api/pedidos/enviar-email-post-pago', async (req, res) => {
     }
 });
 
+// 🔥 RUTA DE PRUEBA - Simular webhook de Stripe (ELIMINAR DESPUÉS)
+app.post('/api/test-webhook', async (req, res) => {
+    console.log('🧪 TEST WEBHOOK - Simulando pago de Stripe');
+
+    // Datos simulados de un pago exitoso
+    const mockSession = {
+        id: 'cs_test_' + Date.now(),
+        metadata: {
+            usuarioId: '22',  // Cambia por un ID de usuario real
+            carritoId: '11',  // Cambia por un carrito real
+            total: '29.99',
+            descuento: '0',
+            cuponId: '',
+            direccion_nombre: 'Cliente Test',
+            direccion_calle: 'Calle Test 123',
+            direccion_piso: '1º A',
+            direccion_ciudad: 'Salamanca',
+            direccion_cp: '37001',
+            direccion_pais: 'ES',
+            gift_active: 'false',
+            gift_message: '',
+            gift_cost: '0',
+            es_recogida_tienda: 'false'
+        }
+    };
+
+    try {
+        // Obtener el carrito
+        const carritoId = mockSession.metadata.carritoId;
+        const usuarioId = mockSession.metadata.usuarioId;
+        const total = parseFloat(mockSession.metadata.total);
+
+        // Verificar que el carrito existe
+        const { rows: carritoExists } = await db.query(
+            'SELECT id FROM carritos WHERE id = $1',
+            [carritoId]
+        );
+
+        if (carritoExists.length === 0) {
+            return res.status(404).json({ error: 'Carrito no encontrado' });
+        }
+
+        // Obtener items del carrito
+        const { rows: items } = await db.query(
+            `SELECT ci.cantidad, ci.precio_unitario, p.id as producto_id, p.nombre, p.imagen, ci.talla, ci.color
+             FROM cart_items ci
+             JOIN productos p ON ci.producto_id = p.id
+             WHERE ci.carrito_id = $1`,
+            [carritoId]
+        );
+
+        if (items.length === 0) {
+            return res.status(400).json({ error: 'Carrito vacío' });
+        }
+
+        // Insertar pedido
+        const direccionEnvio = `${mockSession.metadata.direccion_calle}, ${mockSession.metadata.direccion_piso}, ${mockSession.metadata.direccion_ciudad}, ${mockSession.metadata.direccion_cp}`;
+        const direccionDetalles = JSON.stringify({
+            nombre: mockSession.metadata.direccion_nombre,
+            calle: mockSession.metadata.direccion_calle,
+            piso: mockSession.metadata.direccion_piso,
+            ciudad: mockSession.metadata.direccion_ciudad,
+            codigo_postal: mockSession.metadata.direccion_cp,
+            pais: mockSession.metadata.direccion_pais
+        });
+
+        const { rows: pedidoRows } = await db.query(
+            `INSERT INTO pedidos 
+             (usuario_id, total, estado, fecha, direccion_envio, direccion_detalles, cupon_id, descuento_aplicado, stripe_session_id,
+              gift_active, gift_message, gift_cost, metodo_pago, estado_pago) 
+             VALUES ($1, $2, 'pagado', NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'stripe', 'pagado') 
+             RETURNING id`,
+            [usuarioId, total, direccionEnvio, direccionDetalles, null, 0, mockSession.id,
+                false, '', 0]
+        );
+
+        const pedidoId = pedidoRows[0].id;
+        console.log(`✅ Pedido de prueba creado ID: ${pedidoId}`);
+
+        // Guardar items
+        for (const item of items) {
+            await db.query(
+                `INSERT INTO order_items 
+                 (pedido_id, producto_id, cantidad, precio, talla, color, nombre_producto, imagen_producto) 
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+                [pedidoId, item.producto_id, item.cantidad, parseFloat(item.precio_unitario),
+                    item.talla || null, item.color || null, item.nombre, item.imagen]
+            );
+        }
+
+        // Vaciar carrito
+        await db.query('DELETE FROM cart_items WHERE carrito_id = $1', [carritoId]);
+
+        // Enviar email
+        enviarEmailPedido(pedidoId, usuarioId, total, items, direccionEnvio).catch(e => {
+            console.error('Error enviando email:', e);
+        });
+
+        res.json({
+            success: true,
+            pedidoId: pedidoId,
+            message: 'Pedido creado correctamente (simulado)'
+        });
+
+    } catch (err) {
+        console.error('❌ Error en test webhook:', err);
+        res.status(500).json({ error: err.message });
+    }
+});
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
