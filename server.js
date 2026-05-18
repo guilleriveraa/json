@@ -4,7 +4,7 @@ console.log('✅ Express cargado');
 const cors = require('cors');
 console.log('✅ CORS cargado');
 
-const db = require('./db');
+const { pool: db, query } = require('./db');
 console.log('✅ DB cargada');
 
 const jwt = require('jsonwebtoken');
@@ -3055,6 +3055,22 @@ app.post('/api/test-stripe-webhook', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
+// Mantener conexión activa con SSL
+setInterval(async () => {
+    try {
+        await db.query('SELECT 1');
+        console.log('💓 Keep-alive OK');
+    } catch (err) {
+        console.error('❌ Keep-alive falló:', err.message);
+        // Intentar reconectar el pool
+        try {
+            await db.pool.connect();
+            console.log('✅ Pool reconectado');
+        } catch (e) {
+            console.error('❌ No se pudo reconectar:', e.message);
+        }
+    }
+}, 30000); // Cada 30 segundos
 // ===================== INICIAR SERVIDOR =====================
 console.log('🚀 Iniciando servidor...');
 app.listen(PORT, '0.0.0.0', () =>
